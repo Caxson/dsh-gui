@@ -49,6 +49,7 @@
     "@xterm/xterm": "^6.0.0",
     "dsh-gui-bridge": "file:bridge",
     "dsh-gui-browser": "file:browser",
+    "dsh-gui-market": "file:market",
     "electron-updater": "^6.8.9",
     "playwright": "^1.62.1"
   },

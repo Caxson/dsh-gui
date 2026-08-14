@@ -310,7 +310,7 @@ function seedSettings(dshHome) {
  */
 function linkBridgeModules(dshHome) {
   const modulesDir = join(dshHome, 'profiles', 'node_modules');
-  for (const pkg of ['dsh-gui-bridge', 'dsh-gui-browser']) {
+  for (const pkg of ['dsh-gui-bridge', 'dsh-gui-browser', 'dsh-gui-market']) {
     const linkPath = join(modulesDir, pkg);
     const target = join(APP_ROOT, 'node_modules', pkg);
     if (!existsSync(target) || existsSync(linkPath)) continue;

@@ -12,7 +12,9 @@
  */
 
 import { spawn, spawnSync } from 'node:child_process'
+import { chmodSync, mkdirSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 export const name = 'dsh-gui-market'
@@ -180,16 +182,37 @@ export function apply(ctx) {
     return [...groups.values()]
   }
 
+  /**
+   * The engine's `dsh plugin add` shells out to `pnpm`. When pnpm isn't on
+   * PATH but corepack is (default Node installs), synthesize a pnpm shim that
+   * delegates to corepack so installs work out of the box.
+   */
+  function ensurePnpmEnv() {
+    const env = { ...process.env, NO_COLOR: '1' }
+    if (!spawnSync('pnpm', ['--version']).error) return env
+    const corepack = spawnSync('corepack', ['--version'])
+    if (corepack.error) return null
+    const shimDir = join(tmpdir(), 'dsh-gui-market-pnpm-shim')
+    const shim = join(shimDir, 'pnpm')
+    mkdirSync(shimDir, { recursive: true })
+    writeFileSync(shim, '#!/bin/sh\nexec corepack pnpm "$@"\n')
+    chmodSync(shim, 0o755)
+    env.PATH = `${shimDir}:${env.PATH ?? ''}`
+    env.COREPACK_ENABLE_DOWNLOAD_PROMPT = '0'
+    if (!env.COREPACK_NPM_REGISTRY) env.COREPACK_NPM_REGISTRY = 'https://registry.npmmirror.com'
+    return env
+  }
+
   function runInstall(spec) {
     return new Promise((resolve) => {
-      const pnpm = spawnSync('pnpm', ['--version'], { encoding: 'utf8' })
-      if (pnpm.error || pnpm.status !== 0) {
-        resolve({ ok: false, output: '未找到 pnpm。请先安装：npm install -g pnpm' })
+      const env = ensurePnpmEnv()
+      if (env === null) {
+        resolve({ ok: false, output: '未找到 pnpm（也没有 corepack 可兜底）。请先安装：npm install -g pnpm' })
         return
       }
       const binJs = selfRequire.resolve('@deepseek-ai/dsh/lib/bin.js')
       const child = spawn(process.execPath, [binJs, 'plugin', '--profile', 'web', 'add', spec], {
-        env: { ...process.env, NO_COLOR: '1' },
+        env,
         stdio: ['ignore', 'pipe', 'pipe'],
       })
       let output = ''
