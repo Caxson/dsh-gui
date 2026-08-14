@@ -1,0 +1,69 @@
+appId: io.github.caxson.dsh-gui
+productName: Dsh GUI
+copyright: "© 2026 Caxson"
+
+directories:
+  buildResources: build
+  output: dist
+
+files:
+  - src/**/*
+  - plugins/**/*
+  - assets/**/*
+  - package.json
+  - node_modules/**/*
+
+# Bundled Chromium for the browser plugin (resources/browsers/chromium-*).
+extraResources:
+  - from: resources/browsers
+    to: browsers
+
+# DSH's loader resolves plugin packages through Node's internal ESM loader,
+# which cannot read inside the asar archive (the DSH home's node_modules are
+# symlinks into the app bundle). Ship the app unpacked so every require/import
+# hits real files — same layout as the dev run.
+asar: false
+
+# Rely on the shipped N-API prebuilds; do not rebuild against Electron headers.
+npmRebuild: false
+
+mac:
+  category: public.app-category.developer-tools
+  icon: build/icon.icns
+  # Signed + notarized distribution. Requires a "Developer ID Application"
+  # certificate in the login keychain and APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD /
+  # APPLE_TEAM_ID in the environment. Until those exist, build with
+  # `npm run dist:unsigned`.
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  notarize: true
+  target:
+    - target: dmg
+      arch:
+        - arm64
+    # The zip + latest-mac.yml are what the app's built-in auto-updater uses.
+    - target: zip
+      arch:
+        - arm64
+
+# Self-update feed: GitHub Releases is the canonical channel (electron-builder
+# embeds it into app-update.yml and generates latest-mac.yml next to the zip).
+# Mainland-China users can point DSH_GUI_UPDATE_URL at the OSS mirror instead.
+publish:
+  provider: github
+  owner: Caxson
+  repo: dsh-gui
+
+dmg:
+  title: "${productName} ${version}"
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
+
+artifactName: "${productName}-${version}-${arch}.${ext}"

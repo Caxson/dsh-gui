@@ -1,0 +1,8 @@
+{
+  "name": "dsh-gui-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "index.js",
+  "description": "Dsh GUI host bridge: streams agent file/web activity to the desktop shell via a local HTTP endpoint."
+}

@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:" />
+  <link rel="stylesheet" href="vendor/xterm.css" />
+  <link rel="stylesheet" href="panel.css" />
+  <title>Dsh GUI Panel</title>
+</head>
+<body>
+  <header class="panel-header">
+    <nav class="segmented" role="tablist">
+      <button data-tab="terminal" class="seg active" role="tab">终端</button>
+      <button data-tab="files" class="seg" role="tab">文件<span id="files-count" class="count" hidden></span></button>
+      <button data-tab="web" class="seg" role="tab">浏览器</button>
+    </nav>
+    <button id="collapse-btn" class="icon-btn" title="收起面板 (Cmd+B)" aria-label="收起面板">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <path d="M6 3.5 10.5 8 6 12.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </button>
+  </header>
+
+  <section id="terminal" class="pane active" role="tabpanel">
+    <div id="term"></div>
+    <footer id="term-hint" class="statusbar"></footer>
+  </section>
+
+  <section id="files" class="pane" role="tabpanel">
+    <div id="files-list" class="scroll"></div>
+  </section>
+
+  <section id="web" class="pane" role="tabpanel">
+    <div id="browser-bar" class="urlbar"></div>
+    <div id="browser-view" class="browser-view">
+      <img id="browser-img" alt="" />
+      <div id="browser-empty" class="empty">
+        <div class="empty-glyph">◐</div>
+        <div>浏览器未启动</div>
+        <div class="empty-sub">agent 调用 browser 工具后，这里会显示实时画面</div>
+      </div>
+    </div>
+    <div class="pane-split">
+      <div class="pane-title">活动记录</div>
+      <div id="web-list" class="scroll"></div>
+    </div>
+  </section>
+
+  <script src="vendor/xterm.js"></script>
+  <script src="vendor/addon-fit.js"></script>
+  <script src="diff.js"></script>
+  <script src="panel.js"></script>
+</body>
+</html>

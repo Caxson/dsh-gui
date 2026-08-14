@@ -1,0 +1,59 @@
+{
+  "name": "dsh-gui",
+  "version": "1.0.0",
+  "description": "Dsh GUI — a Codex-like macOS desktop GUI for DeepSeek Harness (DSH). The DSH engine is the kernel; this app is a plugin layer on top of it.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Caxson/dsh-gui.git"
+  },
+  "homepage": "https://github.com/Caxson/dsh-gui",
+  "bugs": {
+    "url": "https://github.com/Caxson/dsh-gui/issues"
+  },
+  "main": "src/main.js",
+  "author": "Caxson",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "smoke": "DSH_GUI_SMOKE=1 electron .",
+    "icon": "node scripts/make-icon.js",
+    "vendor": "node scripts/vendor-panel.js",
+    "postinstall": "node scripts/vendor-panel.js",
+    "dist": "electron-builder --mac",
+    "dist:dmg": "electron-builder --mac dmg",
+    "dist:unsigned": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dmg -c.mac.notarize=false",
+    "dist:dir": "electron-builder --mac dir"
+  },
+  "dependencies": {
+    "@deepseek-ai/cordis-plugin-group": "^1.0.1",
+    "@deepseek-ai/dsh": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-anonymous-user-id": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-atomic-write": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-bash-local": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-code-runtime": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-compaction": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-fs": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-invariants": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-output-retention": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-sandbox": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-scope": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-session-telemetry": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-session-title-llm": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-shell": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-spill": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-subagent-in-process-driver": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-subprocess": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-timeout": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-workflow": "^0.1.0-rc.6",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "dsh-gui-bridge": "file:bridge",
+    "dsh-gui-browser": "file:browser",
+    "electron-updater": "^6.8.9",
+    "playwright": "^1.62.1"
+  },
+  "devDependencies": {
+    "electron": "^43.4.0",
+    "electron-builder": "^26.0.12"
+  }
+}

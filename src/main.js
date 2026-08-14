@@ -1,0 +1,680 @@
+'use strict';
+
+/**
+ * Dsh GUI — main process.
+ *
+ * The app is a thin native shell around the DeepSeek Harness (DSH) engine:
+ *   1. it spawns the bundled `dsh web` server as a child process
+ *      (ELECTRON_RUN_AS_NODE, so the Electron binary itself is the Node runtime);
+ *   2. the server boots the `web` profile with the Dsh GUI plugin overlay
+ *      (plugins/desktop.patch.yml) and picks a free port (--port 0);
+ *   3. the shell reads the printed URL line, opens a Codex-like window,
+ *      injects the desktop skin, and manages lifecycle.
+ */
+
+const { app, BaseWindow, WebContentsView, Menu, shell, dialog, ipcMain } = require('electron');
+const { spawn } = require('node:child_process');
+const { join } = require('node:path');
+const { existsSync, mkdirSync, writeFileSync, readFileSync, symlinkSync } = require('node:fs');
+const { autoUpdater } = require('electron-updater');
+
+const APP_NAME = 'Dsh GUI';
+const APP_ROOT = join(__dirname, '..');
+const DSH_BIN = join(APP_ROOT, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js');
+const PATCH_FILE = join(APP_ROOT, 'plugins', 'desktop.patch.yml');
+const SKIN_CSS = join(APP_ROOT, 'src', 'codex-skin.css');
+
+// Test/CI hooks (no effect in normal use): redirect Chromium user data and
+// disable the Chromium sandbox so the app can run inside a restricted file
+// sandbox (e.g. an agent's workspace) that blocks ~/Library writes.
+if (process.env.DSH_GUI_USER_DATA && process.env.DSH_GUI_USER_DATA.trim() !== '') {
+  app.setPath('userData', process.env.DSH_GUI_USER_DATA);
+}
+if (process.env.DSH_GUI_NO_SANDBOX === '1') {
+  app.commandLine.appendSwitch('no-sandbox');
+}
+
+const SMOKE = process.env.DSH_GUI_SMOKE === '1';
+const BOOT_TIMEOUT_MS = 120_000;
+
+// ── auto-update ───────────────────────────────────────────────────────────
+// Canonical channel: GitHub Releases (electron-builder embeds the feed into
+// app-update.yml at build time; no runtime config needed). Mainland-China
+// users can point DSH_GUI_UPDATE_URL at a generic static mirror (Aliyun OSS)
+// hosting the same dmg/zip/latest-mac.yml artifacts.
+const UPDATE_URL_OVERRIDE = (process.env.DSH_GUI_UPDATE_URL || '').trim();
+const UPDATE_DOWNLOAD_PAGE =
+  process.env.DSH_GUI_DOWNLOAD_PAGE ||
+  'https://github.com/Caxson/dsh-gui/releases/latest';
+
+let checkingManually = false;
+
+function setupAutoUpdater() {
+  if (UPDATE_URL_OVERRIDE) {
+    autoUpdater.setFeedURL({
+      provider: 'generic',
+      url: UPDATE_URL_OVERRIDE.replace(/\/?$/, '/'),
+    });
+  }
+  autoUpdater.logger = console;
+  autoUpdater.autoDownload = true; // autoInstallOnAppQuit defaults to true
+
+  autoUpdater.on('update-available', (info) => {
+    console.log(`[dsh-gui] update available: ${info.version}`);
+  });
+
+  autoUpdater.on('update-not-available', () => {
+    if (checkingManually) {
+      checkingManually = false;
+      dialog.showMessageBox({
+        type: 'info',
+        message: '已是最新版本',
+        detail: '当前没有可用的更新。',
+      });
+    }
+  });
+
+  autoUpdater.on('update-downloaded', (info) => {
+    const choice = dialog.showMessageBoxSync({
+      type: 'info',
+      buttons: ['立即重启更新', '稍后'],
+      defaultId: 0,
+      cancelId: 1,
+      message: `新版本 ${info.version} 已下载完成`,
+      detail: '重启后会自动完成更新。',
+    });
+    if (choice === 0) autoUpdater.quitAndInstall();
+  });
+
+  autoUpdater.on('error', (err) => {
+    console.error('[dsh-gui] updater error:', err.message);
+    if (checkingManually) {
+      checkingManually = false;
+      const choice = dialog.showMessageBoxSync({
+        type: 'warning',
+        buttons: ['打开下载页', '取消'],
+        defaultId: 1,
+        cancelId: 1,
+        message: '自动更新不可用',
+        detail:
+          '检查更新失败（未签名 App 或更新服务器不可达）。可打开下载页手动获取最新版本。\n\n' +
+          err.message,
+      });
+      if (choice === 0) shell.openExternal(UPDATE_DOWNLOAD_PAGE);
+    }
+  });
+
+  return autoUpdater;
+}
+
+function checkForUpdates(manual) {
+  checkingManually = manual;
+  try {
+    autoUpdater.checkForUpdates();
+  } catch (err) {
+    console.error('[dsh-gui] updater check failed:', err.message);
+    checkingManually = false;
+  }
+}
+
+let dshChild = null;
+let win = null;
+let mainView = null;
+let bootLog = [];
+
+// ── Codex-style right panel (终端 / 文件 / 浏览器) ──────────────────────────
+const PANEL_WIDTH = 400;
+let panelView = null;
+// Hidden by default (Codex-style: surface the panel on demand via Cmd+B).
+// Smoke mode forces it visible so the layout probe can exercise both states.
+let panelVisible = SMOKE;
+let activeTab = 'terminal';
+let termSeq = 0;
+let engineUrl = null;
+let stateTimer = null;
+let termTimer = null;
+let shotTimer = null;
+let lastBridgeState = null;
+
+function layoutViews() {
+  if (!win || win.isDestroyed()) return;
+  const { width, height } = win.getContentBounds();
+  const mainW = Math.max(0, width - (panelVisible ? PANEL_WIDTH : 0));
+  if (mainView) mainView.setBounds({ x: 0, y: 0, width: mainW, height });
+  if (panelView) {
+    panelView.setBounds({
+      x: mainW,
+      y: 0,
+      width: panelVisible ? PANEL_WIDTH : 0,
+      height,
+    });
+  }
+}
+
+function createPanelView() {
+  panelView = new WebContentsView({
+    webPreferences: {
+      preload: join(__dirname, 'panel', 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  win.contentView.addChildView(panelView);
+  panelView.webContents.on('console-message', (_e, level, message) => {
+    if (level >= 2) console.warn('[panel]', message);
+  });
+  panelView.setBackgroundColor('#0b0d12');
+  panelView.webContents.loadFile(join(__dirname, 'panel', 'panel.html'));
+  if (SMOKE) {
+    panelView.webContents.on('did-finish-load', () => {
+      console.log(JSON.stringify({ panel: 'ok' }));
+    });
+  }
+  layoutViews();
+}
+
+function togglePanel() {
+  panelVisible = !panelVisible;
+  layoutViews();
+  try {
+    writeFileSync(panelPrefPath(), JSON.stringify({ panelVisible }));
+  } catch {
+    /* non-fatal */
+  }
+}
+
+function panelPrefPath() {
+  return join(app.getPath('userData'), 'panel-pref.json');
+}
+
+function readPanelPref() {
+  if (SMOKE) return; // keep the forced-visible default for the layout probe
+  try {
+    const raw = readFileSync(panelPrefPath(), 'utf8');
+    const parsed = JSON.parse(raw);
+    if (typeof parsed.panelVisible === 'boolean') panelVisible = parsed.panelVisible;
+  } catch {
+    /* default shown */
+  }
+}
+
+async function ptyPost(path, body) {
+  if (!engineUrl) {
+    if (process.env.DSH_GUI_DEBUG) console.log(`[pty-debug] drop ${path}: no engineUrl`);
+    return;
+  }
+  try {
+    const res = await fetch(`${engineUrl}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (process.env.DSH_GUI_DEBUG) console.log(`[pty-debug] ${path} -> ${res.status}`);
+  } catch (err) {
+    if (process.env.DSH_GUI_DEBUG) console.log(`[pty-debug] ${path} failed: ${err.message}`);
+  }
+}
+
+async function pollTerminalOut() {
+  if (!engineUrl || activeTab !== 'terminal') {
+    if (process.env.DSH_GUI_DEBUG) console.log(`[pty-debug] poll skip url=${!!engineUrl} tab=${activeTab}`);
+    return;
+  }
+  try {
+    const res = await fetch(`${engineUrl}/dsh-gui/terminal/out?since=${termSeq}`, { cache: 'no-store' });
+    if (!res.ok) {
+      if (process.env.DSH_GUI_DEBUG) console.log(`[pty-debug] out http ${res.status}`);
+      return;
+    }
+    const data = await res.json();
+    termSeq = data.seq;
+    if (process.env.DSH_GUI_DEBUG && data.chunks?.length) {
+      console.log(`[pty-debug] out seq=${data.seq} chunks=${data.chunks.length} panel=${!!panelView}`);
+    }
+    if (data.chunks?.length && panelView && !panelView.webContents.isDestroyed()) {
+      for (const chunk of data.chunks) panelView.webContents.send('panel:pty-data', chunk);
+    }
+  } catch (err) {
+    if (process.env.DSH_GUI_DEBUG) console.log(`[pty-debug] out failed: ${err.message}`);
+  }
+}
+
+async function pollBrowserShot() {
+  if (!engineUrl || activeTab !== 'web') return;
+  try {
+    const res = await fetch(`${engineUrl}/dsh-gui/browser/shot`, { cache: 'no-store' });
+    if (!res.ok) return;
+    const shot = await res.json();
+    if (panelView && !panelView.webContents.isDestroyed()) {
+      panelView.webContents.send('panel:browser-shot', shot);
+    }
+  } catch {
+    /* transient */
+  }
+}
+
+async function pollBridgeState() {
+  if (!engineUrl) return;
+  try {
+    const res = await fetch(`${engineUrl}/dsh-gui/state`, { cache: 'no-store' });
+    if (!res.ok) return;
+    lastBridgeState = await res.json();
+    if (panelView && !panelView.webContents.isDestroyed()) {
+      panelView.webContents.send('panel:state', lastBridgeState);
+    }
+  } catch {
+    /* engine not ready / restarted — next tick retries */
+  }
+}
+
+function wirePanelIpc() {
+  ipcMain.on('panel:pty-open', (_e, cols, rows) => ptyPost('/dsh-gui/terminal/open', { cols, rows }));
+  ipcMain.on('panel:pty-input', (_e, data) => ptyPost('/dsh-gui/terminal/input', { data }));
+  ipcMain.on('panel:pty-resize', (_e, cols, rows) => ptyPost('/dsh-gui/terminal/resize', { cols, rows }));
+  ipcMain.on('panel:pty-close', () => {
+    /* the engine-side shared PTY stays alive for the agent */
+  });
+  ipcMain.on('panel:tab', (_e, tab) => {
+    activeTab = tab;
+  });
+  ipcMain.on('panel:collapse', () => togglePanel());
+}
+
+/** DSH home: an isolated per-user harness home by default; override with DSH_GUI_HOME. */
+function resolveDshHome() {
+  if (process.env.DSH_GUI_HOME && process.env.DSH_GUI_HOME.trim() !== '') {
+    return process.env.DSH_GUI_HOME;
+  }
+  return join(app.getPath('appData'), APP_NAME, 'dsh-home');
+}
+
+/** First run: seed a dark-theme preference so the GUI opens Codex-like. */
+function seedSettings(dshHome) {
+  const settingsFile = join(dshHome, 'settings.yaml');
+  if (existsSync(settingsFile)) return;
+  mkdirSync(dshHome, { recursive: true });
+  writeFileSync(
+    settingsFile,
+    '# First-run defaults written by Dsh GUI.\n' +
+      'ui-theme:\n' +
+      '  preference: dark\n',
+  );
+}
+
+/**
+ * Make the dsh-gui-bridge package resolvable by the engine's loader.
+ * The engine symlinks only dsh's own dependency closure into
+ * <dsh-home>/profiles/node_modules; our bridge is an app-level package, so we
+ * link it there ourselves — same mechanism, idempotent, survives updates.
+ */
+function linkBridgeModules(dshHome) {
+  const modulesDir = join(dshHome, 'profiles', 'node_modules');
+  for (const pkg of ['dsh-gui-bridge', 'dsh-gui-browser']) {
+    const linkPath = join(modulesDir, pkg);
+    const target = join(APP_ROOT, 'node_modules', pkg);
+    if (!existsSync(target) || existsSync(linkPath)) continue;
+    mkdirSync(modulesDir, { recursive: true });
+    try {
+      symlinkSync(target, linkPath, 'dir');
+      console.log(`[dsh-gui] linked ${pkg} into profile node_modules`);
+    } catch (err) {
+      console.warn(`[dsh-gui] could not link ${pkg}:`, err.message);
+    }
+  }
+}
+
+function stripAnsi(text) {
+  return text.replace(/\x1b\[[0-9;]*m/g, '');
+}
+
+/** Start `dsh web` and resolve the served URL from its stdout. */
+function startDshServer(dshHome, onUrl, onFail) {
+  // Launcher flags (--patch) must come before the web app's own flags (--port).
+  // --expose-internals: the DSH loader needs access to Node's internal ESM
+  // loader (HMR service) and can't use its native fallback under Electron's
+  // Node 24, so hand it the flag directly.
+  const args = ['--expose-internals', DSH_BIN, 'web'];
+  if (existsSync(PATCH_FILE)) args.push('--patch', PATCH_FILE);
+  args.push('--port', '0');
+
+  // Bundled Chromium for the browser plugin lives at resources/browsers in
+  // packaged builds; in dev Playwright uses its own download cache.
+  const browsersPath = join(process.resourcesPath, 'browsers');
+
+  const child = spawn(process.execPath, args, {
+    env: {
+      ...process.env,
+      ELECTRON_RUN_AS_NODE: '1',
+      DSH_HOME: dshHome,
+      DSH_TELEMETRY_DISABLED: '1',
+      NO_COLOR: '1',
+      ...(existsSync(browsersPath) ? { PLAYWRIGHT_BROWSERS_PATH: browsersPath } : {}),
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  let out = '';
+  child.stdout.on('data', (chunk) => {
+    out += chunk.toString();
+    bootLog.push(chunk.toString());
+    const m = stripAnsi(out).match(/dsh web:\s*(https?:\/\/[^\s]+)/);
+    if (m) {
+      out = '';
+      onUrl(m[1]);
+    }
+  });
+  child.stderr.on('data', (chunk) => bootLog.push(chunk.toString()));
+
+  child.on('error', (err) => onFail(`failed to start the DSH engine: ${err.message}`));
+  child.on('exit', (code, signal) => {
+    if (code !== 0 && !app.isQuitting) {
+      onFail(
+        `the DSH engine exited unexpectedly (code ${code}, signal ${signal}).\n\n` +
+          `Log tail:\n${bootLog.slice(-30).join('')}`,
+      );
+    }
+  });
+
+  return child;
+}
+
+function buildMenu() {
+  const template = [
+    {
+      label: APP_NAME,
+      submenu: [
+        { role: 'about' },
+        { type: 'separator' },
+        {
+          label: 'Open DSH Home…',
+          click: () => shell.openPath(resolveDshHome()),
+        },
+        { type: 'separator' },
+        {
+          label: '检查更新…',
+          click: () => checkForUpdates(true),
+        },
+        { type: 'separator' },
+        {
+          label: '切换右侧面板',
+          accelerator: 'CmdOrCtrl+B',
+          click: () => togglePanel(),
+        },
+        { type: 'separator' },
+        { role: 'hide' },
+        { role: 'hideOthers' },
+        { role: 'unhide' },
+        { type: 'separator' },
+        { role: 'quit' },
+      ],
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'selectAll' },
+      ],
+    },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' },
+        { role: 'forceReload' },
+        { role: 'toggleDevTools' },
+        { type: 'separator' },
+        { role: 'resetZoom' },
+        { role: 'zoomIn' },
+        { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' },
+      ],
+    },
+    { role: 'windowMenu' },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+function createWindow() {
+  win = new BaseWindow({
+    width: 1440,
+    height: 900,
+    minWidth: 980,
+    minHeight: 620,
+    backgroundColor: '#0b0d12',
+    title: APP_NAME,
+    show: false,
+  });
+
+  mainView = new WebContentsView({
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  win.contentView.addChildView(mainView);
+
+  readPanelPref();
+  wirePanelIpc();
+  createPanelView();
+  layoutViews();
+
+  win.on('resize', layoutViews);
+  win.on('resized', layoutViews);
+  win.once('ready-to-show', () => win.show());
+  win.show();
+
+  mainView.webContents.on('page-title-updated', (event) => {
+    event.preventDefault();
+    win.setTitle(APP_NAME);
+  });
+  mainView.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith('http://') || url.startsWith('https://')) shell.openExternal(url);
+    return { action: 'deny' };
+  });
+  mainView.webContents.on('will-navigate', (event, url) => {
+    let origin = 'null';
+    try {
+      origin = new URL(mainView.webContents.getURL()).origin;
+    } catch {
+      /* splash page — nothing to compare against */
+    }
+    if (origin !== 'null' && !url.startsWith(origin)) {
+      event.preventDefault();
+      shell.openExternal(url);
+    }
+  });
+
+  // Splash while the engine boots.
+  mainView.webContents.loadURL(
+    'data:text/html;charset=utf-8,' +
+      encodeURIComponent(
+        `<!doctype html><html><body style="margin:0;background:#0b0d12;display:flex;align-items:center;justify-content:center;height:100vh;font-family:-apple-system,sans-serif;color:#8b93a7">
+        <div style="text-align:center"><div style="font-size:34px;font-weight:700;color:#e8ecf4">Dsh GUI</div>
+        <div style="margin-top:10px;font-size:14px">Starting the DeepSeek Harness engine…</div></div></body></html>`,
+      ),
+  );
+
+  mainView.webContents.on('did-finish-load', async () => {
+    if (existsSync(SKIN_CSS)) {
+      try {
+        await mainView.webContents.insertCSS(readFileSync(SKIN_CSS, 'utf8'));
+      } catch (err) {
+        console.warn('[dsh-gui] skin injection failed:', err.message);
+      }
+    }
+    if (SMOKE) {
+      // End-to-end probe: switch the panel to the terminal tab, type a
+      // command through the real IPC/PTY path, and read the rendered output
+      // back from xterm's DOM to prove the whole terminal chain works.
+      const probe = async () => {
+        const finish = (result) => {
+          console.log(JSON.stringify(result));
+          if (dshChild) dshChild.kill('SIGTERM');
+          app.exit(0);
+        };
+        try {
+          if (!panelView || panelView.webContents.isDestroyed()) {
+            finish({ smoke: 'ok', url: mainView.webContents.getURL(), title: win.getTitle(), panel: 'missing' });
+            return;
+          }
+          await panelView.webContents.executeJavaScript(`switchTab('terminal')`);
+          setTimeout(() => {
+            ipcMain.emit('panel:pty-input', null, 'echo PANEL_PTY_OK\r');
+            setTimeout(async () => {
+              try {
+                const text = await panelView.webContents.executeJavaScript(
+                  `(() => {
+                    const dom = document.querySelector('.xterm-rows') ? document.querySelector('.xterm-rows').textContent : 'NO_XTERM';
+                    let buf = 'NO_TERM';
+                    try {
+                      const b = term.buffer.active;
+                      const lines = [];
+                      for (let i = 0; i < Math.min(b.length, 12); i++) lines.push(b.getLine(i).translateToString(true));
+                      buf = lines.join('\\n');
+                    } catch (e) { buf = 'ERR:' + e.message; }
+                    return dom + '|BUF|' + buf;
+                  })()`,
+                );
+                // switch to the browser tab and verify the shot IPC loop
+                await panelView.webContents.executeJavaScript(`switchTab('web')`);
+                await new Promise((r) => setTimeout(r, 2200));
+                const browserState = await panelView.webContents.executeJavaScript(
+                  `({ emptyVisible: document.getElementById('browser-empty').style.display !== 'none', bar: document.getElementById('browser-bar').textContent })`,
+                );
+                // layout probe: the panel must take space from the window,
+                // never overlay the main view (Codex-style reallocation)
+                const winW = win.getContentBounds().width;
+                const shown = { main: mainView.getBounds().width, panel: panelView.getBounds().width, win: winW };
+                togglePanel();
+                const hidden = { main: mainView.getBounds().width, panel: panelView.getBounds().width, win: win.getContentBounds().width };
+                togglePanel();
+                const layoutOk =
+                  shown.main === winW - PANEL_WIDTH &&
+                  shown.panel === PANEL_WIDTH &&
+                  hidden.main === win.getContentBounds().width &&
+                  hidden.panel === 0;
+                finish({
+                  smoke: 'ok',
+                  url: mainView.webContents.getURL(),
+                  title: win.getTitle(),
+                  panel: 'ok',
+                  ptyProbe: String(text).includes('PANEL_PTY_OK') ? 'ok' : `see:${String(text).slice(0, 120)}`,
+                  browserProbe: browserState.emptyVisible === true ? 'ok(not-launched)' : `see:${JSON.stringify(browserState)}`,
+                  layoutProbe: layoutOk ? 'ok' : `see:${JSON.stringify({ shown, hidden })}`,
+                });
+              } catch (err) {
+                finish({ smoke: 'ok', ptyProbe: `error:${err.message}` });
+              }
+            }, 3000);
+          }, 1500);
+        } catch (err) {
+          finish({ smoke: 'ok', ptyProbe: `error:${err.message}` });
+        }
+      };
+      probe();
+    }
+  });
+
+  win.on('closed', () => {
+    win = null;
+    mainView = null;
+  });
+}
+
+function fail(message) {
+  console.error('[dsh-gui]', message);
+  if (dshChild) dshChild.kill('SIGTERM');
+  if (SMOKE) {
+    console.log(JSON.stringify({ smoke: 'failed', error: message, logTail: bootLog.slice(-20).join('') }));
+    app.exit(1);
+    return;
+  }
+  dialog.showErrorBox(APP_NAME, message);
+  app.quit();
+}
+
+// ── lifecycle ─────────────────────────────────────────────────────────────
+
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (win) {
+      if (win.isMinimized()) win.restore();
+      win.focus();
+    }
+  });
+
+  app.whenReady().then(() => {
+    buildMenu();
+    createWindow();
+    setupAutoUpdater();
+
+    // Silent background update check on startup (packaged builds only;
+    // skipped in smoke mode so tests never hit the network).
+    if (app.isPackaged && !SMOKE) {
+      setTimeout(() => checkForUpdates(false), 8000);
+    }
+
+    const dshHome = resolveDshHome();
+    seedSettings(dshHome);
+    linkBridgeModules(dshHome);
+    console.log(`[dsh-gui] DSH_HOME=${dshHome}`);
+
+    let bootTimer = setTimeout(() => {
+      fail(`the DSH engine did not report a URL within ${BOOT_TIMEOUT_MS / 1000}s.` +
+        `\n\nLog tail:\n${bootLog.slice(-30).join('')}`);
+    }, BOOT_TIMEOUT_MS);
+
+    dshChild = startDshServer(
+      dshHome,
+      (url) => {
+        clearTimeout(bootTimer);
+        engineUrl = url;
+        if (!stateTimer) {
+          stateTimer = setInterval(pollBridgeState, 1200);
+          termTimer = setInterval(pollTerminalOut, 150);
+          shotTimer = setInterval(pollBrowserShot, 900);
+        }
+        console.log(`[dsh-gui] engine ready at ${url}`);
+        if (mainView && !mainView.webContents.isDestroyed()) mainView.webContents.loadURL(url);
+      },
+      (message) => {
+        clearTimeout(bootTimer);
+        fail(message);
+      },
+    );
+  });
+
+  app.on('before-quit', () => {
+    app.isQuitting = true;
+    if (stateTimer) {
+      clearInterval(stateTimer);
+      clearInterval(termTimer);
+      clearInterval(shotTimer);
+      stateTimer = null;
+      termTimer = null;
+      shotTimer = null;
+    }
+    if (dshChild) {
+      dshChild.kill('SIGTERM');
+      dshChild = null;
+    }
+  });
+
+  app.on('window-all-closed', () => {
+    app.quit();
+  });
+
+  app.on('activate', () => {
+    if (win === null && app.isReady()) createWindow();
+  });
+}

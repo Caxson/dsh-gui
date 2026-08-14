@@ -1,0 +1,31 @@
+# Dsh GUI — the desktop product expressed as a DSH plugin layer.
+#
+# This file is a loader patch overlay for the `web` profile. Dsh GUI boots
+# the DSH engine with `dsh web --patch <this file>`, so every behavior the
+# desktop app contributes lives in DSH's own plugin/composition system: the
+# Electron shell is just the native carrier, the kernel stays DeepSeek Harness.
+#
+# A patch entry replaces the targeted row's whole `config`, so each entry
+# restates every key the row owns (same shape as the web-app bundle layer).
+
+# The deployment persona: what the model believes it is in the desktop GUI.
+# Only registered prompt variables are allowed ({{model}}, {{cwd}}, ...).
+- id: system-prompt
+  config:
+    persona: >-
+      You are a coding agent powered by the {{model}} model, running inside
+      Dsh GUI — a native macOS desktop app. The engine underneath you is
+      DeepSeek Harness (DSH); this desktop app is a plugin layer that boots the
+      harness GUI for you. The user is working with you through this desktop
+      GUI and refers to it as "the app". Their working directory is {{cwd}}.
+
+# Dsh GUI host bridge: powers the right panel (file changes + browser
+# activity + shared terminal). Local, loopback-only endpoints the shell polls.
+- insert:
+    - id: desktop-bridge
+      name: 'dsh-gui-bridge'
+
+# Dsh GUI browser: agent-drivable headless Chromium + live view stream.
+- insert:
+    - id: desktop-browser
+      name: 'dsh-gui-browser'

@@ -1,0 +1,541 @@
+/* Dsh GUI right panel — Codex-style visual system.
+   Same blue-tinted dark family as codex-skin.css so the panel reads as one
+   surface with the main view. */
+
+:root {
+  --bg: #0b0d12;
+  --bg-2: #10131b;
+  --bg-3: #171b26;
+  --bg-hover: #1c2130;
+  --border: #1f2532;
+  --border-strong: #2a3245;
+  --text: #e6eaf2;
+  --text-mid: #aab3c5;
+  --text-dim: #7c8598;
+  --accent: #5b7cff;
+  --green: #3fb950;
+  --red: #f85149;
+  --yellow: #d29922;
+  --purple: #b48cf2;
+  --add-bg: rgba(63, 185, 80, 0.12);
+  --rem-bg: rgba(248, 81, 73, 0.12);
+  --mono: "SF Mono", ui-monospace, Menlo, monospace;
+  --radius: 8px;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, "SF Pro Text", "PingFang SC", sans-serif;
+  font-size: 12px;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(140, 150, 175, 0.28);
+  border-radius: 6px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(140, 150, 175, 0.5);
+  background-clip: content-box;
+  border: 3px solid transparent;
+}
+::selection {
+  background: rgba(91, 124, 255, 0.35);
+}
+
+/* ── header: segmented control ─────────────────────────────────────────── */
+
+.panel-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 8px 8px 10px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  -webkit-app-region: no-drag;
+}
+
+.segmented {
+  flex: 1 1 auto;
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.seg {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 4px 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 0.12s, background 0.12s;
+}
+
+.seg:hover {
+  color: var(--text-mid);
+}
+
+.seg.active {
+  color: var(--text);
+  background: var(--bg-3);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+.count {
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: rgba(91, 124, 255, 0.18);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 15px;
+  text-align: center;
+}
+
+.icon-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.icon-btn:hover {
+  color: var(--text);
+  background: var(--bg-3);
+}
+
+/* ── panes ─────────────────────────────────────────────────────────────── */
+
+.pane {
+  display: none;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.pane.active {
+  display: flex;
+  flex-direction: column;
+}
+
+.scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+/* ── terminal ──────────────────────────────────────────────────────────── */
+
+#term {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 8px 4px 4px 10px;
+}
+
+#term .xterm {
+  height: 100%;
+}
+
+.statusbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-2);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.statusbar::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+}
+
+.statusbar:empty {
+  display: none;
+}
+
+/* ── file cards ────────────────────────────────────────────────────────── */
+
+.file-card {
+  margin-bottom: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-2);
+  overflow: hidden;
+}
+
+.file-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 10px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.file-head:hover {
+  background: var(--bg-hover);
+}
+
+.chev {
+  flex: 0 0 auto;
+  width: 8px;
+  color: var(--text-dim);
+  font-size: 9px;
+  transition: transform 0.12s;
+}
+
+.file-card.open .chev {
+  transform: rotate(90deg);
+}
+
+.file-name {
+  flex: 0 0 auto;
+  max-width: 62%;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-dir {
+  flex: 1 1 auto;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+}
+
+.stat {
+  flex: 0 0 auto;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+.stat.add {
+  color: var(--green);
+}
+
+.stat.del {
+  color: var(--red);
+}
+
+.file-body {
+  display: none;
+  border-top: 1px solid var(--border);
+}
+
+.file-card.open .file-body {
+  display: block;
+}
+
+.entry + .entry {
+  border-top: 1px dashed var(--border);
+}
+
+.entry-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px 0;
+}
+
+.badge {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--bg-3);
+  color: var(--text-dim);
+}
+
+.badge.edit {
+  background: rgba(91, 124, 255, 0.15);
+  color: var(--accent);
+}
+
+.badge.create,
+.badge.write {
+  background: rgba(63, 185, 80, 0.15);
+  color: var(--green);
+}
+
+.badge.insert {
+  background: rgba(210, 153, 34, 0.15);
+  color: var(--yellow);
+}
+
+.badge.search {
+  background: rgba(91, 124, 255, 0.15);
+  color: var(--accent);
+}
+
+.badge.fetch {
+  background: rgba(180, 140, 242, 0.15);
+  color: var(--purple);
+}
+
+.time {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 10px;
+}
+
+/* ── diff ──────────────────────────────────────────────────────────────── */
+
+.diff {
+  margin: 5px 0 0;
+  padding: 4px 0 6px;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.55;
+  max-height: 240px;
+  overflow: auto;
+}
+
+.diff .row {
+  padding: 0 10px 0 22px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  position: relative;
+}
+
+.diff .row::before {
+  position: absolute;
+  left: 9px;
+  color: inherit;
+  opacity: 0.75;
+}
+
+.diff .ctx {
+  color: var(--text-dim);
+}
+
+.diff .add {
+  color: #7ee2a8;
+  background: var(--add-bg);
+}
+
+.diff .add::before {
+  content: "+";
+}
+
+.diff .rem {
+  color: #ffa198;
+  background: var(--rem-bg);
+}
+
+.diff .rem::before {
+  content: "-";
+}
+
+.diff .skip {
+  color: var(--text-dim);
+  background: var(--bg-3);
+  font-size: 10px;
+  padding: 1px 10px 1px 22px;
+  margin: 2px 0;
+}
+
+.note {
+  padding: 4px 10px 8px;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+/* ── web cards ─────────────────────────────────────────────────────────── */
+
+.urlbar {
+  flex: 0 0 auto;
+  margin: 8px 8px 0;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-2);
+  color: var(--text-mid);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.urlbar:empty {
+  display: none;
+}
+
+.browser-view {
+  flex: 0 0 56%;
+  min-height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-2);
+  overflow: hidden;
+}
+
+.browser-view img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  display: none;
+}
+
+.pane-split {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+}
+
+.pane-title {
+  flex: 0 0 auto;
+  padding: 6px 10px 4px;
+  color: var(--text-dim);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+}
+
+.web-card {
+  margin-bottom: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-2);
+  overflow: hidden;
+}
+
+.web-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 10px;
+}
+
+.web-query {
+  padding: 0 10px 6px;
+  color: var(--text);
+  font-size: 11.5px;
+  word-break: break-all;
+}
+
+.web-links {
+  padding: 6px 10px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.web-links a {
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.web-links a:hover {
+  text-decoration: underline;
+}
+
+.web-result {
+  padding: 6px 10px;
+  border-top: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 11px;
+  word-break: break-all;
+}
+
+/* ── empty states ──────────────────────────────────────────────────────── */
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 28px 16px;
+  color: var(--text-mid);
+  text-align: center;
+}
+
+.empty-glyph {
+  font-size: 20px;
+  color: var(--text-dim);
+  margin-bottom: 2px;
+}
+
+.empty-sub {
+  color: var(--text-dim);
+  font-size: 11px;
+}

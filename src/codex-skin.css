@@ -1,0 +1,41 @@
+/* Dsh GUI — conservative skin over the DSH web theme.
+   Injected into every page via webContents.insertCSS. Only generic rules,
+   so it stays safe across DSH UI updates. */
+
+html,
+body {
+  background-color: #0b0d12;
+}
+
+/* softer scrollbars */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(140, 150, 175, 0.32);
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(140, 150, 175, 0.55);
+  background-clip: content-box;
+  border: 2px solid transparent;
+  border-radius: 6px;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* no focus ring flashes on click for mouse users */
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  outline-color: #5b7cff;
+}
+
+/* selection tint matches the brand */
+::selection {
+  background: rgba(91, 124, 255, 0.35);
+}
