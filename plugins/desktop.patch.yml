@@ -29,3 +29,9 @@
 - insert:
     - id: desktop-browser
       name: 'dsh-gui-browser'
+
+# Dsh GUI market: the plugin market (Settings → 插件 → 市场) — installed-plugin
+# metadata, GitHub/npm search, one-click install via the engine's own CLI.
+- insert:
+    - id: desktop-market
+      name: 'dsh-gui-market'
