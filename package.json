@@ -1,6 +1,6 @@
 {
   "name": "dsh-gui",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Dsh GUI — a Codex-like macOS desktop GUI for DeepSeek Harness (DSH). The DSH engine is the kernel; this app is a plugin layer on top of it.",
   "repository": {
     "type": "git",
@@ -49,6 +49,9 @@
     "@xterm/xterm": "^6.0.0",
     "dsh-gui-bridge": "file:bridge",
     "dsh-gui-browser": "file:browser",
+    "dsh-gui-flow": "file:flow",
+    "dsh-gui-import": "file:import",
+    "dsh-gui-market": "file:market",
     "electron-updater": "^6.8.9",
     "playwright": "^1.62.1"
   },

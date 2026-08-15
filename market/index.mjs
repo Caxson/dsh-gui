@@ -12,7 +12,9 @@
  */
 
 import { spawn, spawnSync } from 'node:child_process'
+import { chmodSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 export const name = 'dsh-gui-market'
@@ -24,7 +26,24 @@ const INSTALL_TIMEOUT_MS = 300_000
 // git+https urls. Anything else (flags, paths, shell metachars) is rejected.
 const SPEC_RE = /^(@?[a-z0-9][\w.-]*(\/[a-z0-9][\w.-]*)?(@[\w.^~<>=-]+)?|github:[\w.-]+\/[\w.-]+(#[\w./-]+)?|git\+https:\/\/[\w./@:-]+)$/i
 
+const MAX_BODY_BYTES = 1_000_000
 const selfRequire = createRequire(import.meta.url)
+
+/** Reject cross-origin callers (see dsh-gui-bridge for the rationale). */
+function sameOrigin(req) {
+  const origin = req.headers.origin || req.headers.referer
+  if (!origin) return true
+  try {
+    return new URL(origin).host === (req.headers.host || '')
+  } catch {
+    return false
+  }
+}
+
+const guard = (handler) => async (req, res) => {
+  if (!sameOrigin(req)) return sendJson(res, 403, { error: 'forbidden' })
+  return handler(req, res)
+}
 
 function sendJson(res, status, body) {
   res.statusCode = status
@@ -35,7 +54,16 @@ function sendJson(res, status, body) {
 function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = []
-    req.on('data', (c) => chunks.push(c))
+    let size = 0
+    req.on('data', (c) => {
+      size += c.length
+      if (size > MAX_BODY_BYTES) {
+        reject(new Error('request body too large'))
+        req.destroy()
+        return
+      }
+      chunks.push(c)
+    })
     req.on('end', () => {
       try {
         resolve(JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'))
@@ -156,6 +184,17 @@ function dedupe(rows) {
   })
 }
 
+/**
+ * dsh-ecosystem filter. Name alone is not enough (npm's `dsh` is an unrelated
+ * JS shell), so require either a dsh- name prefix (scoped included) or an
+ * explicit DeepSeek/Harness mention in the metadata.
+ */
+function dshOnly(rows) {
+  const namePrefix = /(^|\/)dsh[-_]/i
+  const mention = /deepseek|harness/i
+  return rows.filter((r) => namePrefix.test(r.name) || mention.test(`${r.name} ${r.description}`))
+}
+
 export function apply(ctx) {
   const resolveMetadata = makeMetadataResolver()
   let installing = false
@@ -180,16 +219,38 @@ export function apply(ctx) {
     return [...groups.values()]
   }
 
+  /**
+   * The engine's `dsh plugin add` shells out to `pnpm`. When pnpm isn't on
+   * PATH but corepack is (default Node installs), synthesize a pnpm shim that
+   * delegates to corepack so installs work out of the box.
+   */
+  function ensurePnpmEnv() {
+    const env = { ...process.env, NO_COLOR: '1' }
+    if (!spawnSync('pnpm', ['--version']).error) return env
+    const corepack = spawnSync('corepack', ['--version'])
+    if (corepack.error) return null
+    // mkdtemp (not a fixed shared path) avoids a symlink-preplacement TOCTOU on
+    // the world-shared tmp dir.
+    const shimDir = mkdtempSync(join(tmpdir(), 'dsh-gui-pnpm-'))
+    const shim = join(shimDir, 'pnpm')
+    writeFileSync(shim, '#!/bin/sh\nexec corepack pnpm "$@"\n')
+    chmodSync(shim, 0o755)
+    env.PATH = `${shimDir}:${env.PATH ?? ''}`
+    env.COREPACK_ENABLE_DOWNLOAD_PROMPT = '0'
+    if (!env.COREPACK_NPM_REGISTRY) env.COREPACK_NPM_REGISTRY = 'https://registry.npmmirror.com'
+    return env
+  }
+
   function runInstall(spec) {
     return new Promise((resolve) => {
-      const pnpm = spawnSync('pnpm', ['--version'], { encoding: 'utf8' })
-      if (pnpm.error || pnpm.status !== 0) {
-        resolve({ ok: false, output: '未找到 pnpm。请先安装：npm install -g pnpm' })
+      const env = ensurePnpmEnv()
+      if (env === null) {
+        resolve({ ok: false, output: '未找到 pnpm（也没有 corepack 可兜底）。请先安装：npm install -g pnpm' })
         return
       }
       const binJs = selfRequire.resolve('@deepseek-ai/dsh/lib/bin.js')
       const child = spawn(process.execPath, [binJs, 'plugin', '--profile', 'web', 'add', spec], {
-        env: { ...process.env, NO_COLOR: '1' },
+        env,
         stdio: ['ignore', 'pipe', 'pipe'],
       })
       let output = ''
@@ -217,35 +278,37 @@ export function apply(ctx) {
   ctx.webServer.register({
     kind: 'exact',
     path: '/api/market/installed',
-    handler: (_req, res) => {
+    handler: guard((_req, res) => {
       try {
         sendJson(res, 200, { plugins: listInstalled() })
       } catch (err) {
         sendJson(res, 500, { error: err.message })
       }
-    },
+    }),
   })
 
   ctx.webServer.register({
     kind: 'exact',
     path: '/api/market/search',
-    handler: async (req, res) => {
+    handler: guard(async (req, res) => {
       const params = new URL(req.url, 'http://x').searchParams
       const source = params.get('source') === 'github' ? 'github' : 'npm'
+      const strict = params.get('strict') !== '0'
       const query = (params.get('q') ?? '').trim() || 'dsh-plugin'
       try {
         const rows = source === 'github' ? await searchGithub(query) : await searchNpm(query)
-        sendJson(res, 200, { results: dedupe(rows) })
+        const deduped = dedupe(rows)
+        sendJson(res, 200, { results: strict ? dshOnly(deduped) : deduped })
       } catch (err) {
         sendJson(res, 502, { error: `搜索失败: ${err.message}` })
       }
-    },
+    }),
   })
 
   ctx.webServer.register({
     kind: 'exact',
     path: '/api/market/install',
-    handler: async (req, res) => {
+    handler: guard(async (req, res) => {
       let body
       try {
         body = await readBody(req)
@@ -266,9 +329,13 @@ export function apply(ctx) {
       try {
         const result = await runInstall(spec)
         sendJson(res, result.ok ? 200 : 500, result)
+      } catch (err) {
+        // runInstall is resolve-typed, but resolve()/spawn setup can still
+        // throw — never leave the client's request hanging.
+        sendJson(res, 500, { ok: false, output: `安装启动失败: ${err.message}` })
       } finally {
         installing = false
       }
-    },
+    }),
   })
 }

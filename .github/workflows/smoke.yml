@@ -1,0 +1,30 @@
+# Gate for engine bumps (and every PR): boot the real engine + panel on a
+# macOS runner and run the end-to-end smoke probe. A green run means the
+# upstream update kept our plugin contracts intact.
+name: smoke
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run end-to-end smoke
+        # Fresh isolated home; the probe exercises engine boot, the shared
+        # PTY chain, the browser tab loop, and panel layout.
+        run: |
+          DSH_GUI_USER_DATA="$RUNNER_TEMP/ud" DSH_GUI_HOME="$RUNNER_TEMP/home" npm run smoke | tee smoke.log
+          grep -q '"ptyProbe":"ok"' smoke.log
+          grep -q '"layoutProbe":"ok"' smoke.log

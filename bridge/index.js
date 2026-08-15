@@ -3,9 +3,11 @@
  *
  * Mounted into the web profile via plugins/desktop.patch.yml. Provides:
  *  1. session/event → file/web activity snapshot (right panel 文件/浏览器 tabs);
- *  2. a shared, persistent PTY that BOTH the agent (via the `terminal_send`
- *     tool) and the right panel terminal use — the user sees every command the
- *     agent runs in the same terminal, Codex-style.
+ *  2. PTY sessions for the right panel's terminal tabs. The `agent` PTY is
+ *     shared with the model's `terminal_send` tool (the user watches the agent
+ *     type, Codex-style); extra terminal tabs get their own local PTYs.
+ *  3. a side-chat completion stream (ephemeral chats in the right panel) via
+ *     the engine's llm service and the deployment's default model.
  *
  * Everything runs on the engine's existing loopback webserver; no kernel
  * changes, no external services.
@@ -14,21 +16,53 @@
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
+import { BlockAssembler, createUserMessage, createAssistantMessage, deepFreeze } from "@deepseek-ai/dsh-llm";
 
 export const name = "dsh-gui-bridge";
-export const inject = ["tools"];
+export const inject = ["tools", "llm"];
 
 const require = createRequire(import.meta.url);
 const MAX_ACTIVITIES = 200;
 const URL_RE = /https?:\/\/[^\s"'<>()]+/g;
-const PTY_OUT_MAX = 400; // ring-buffer chunks
+const PTY_OUT_MAX = 400; // ring-buffer chunks per pty
 const DEFAULT_SHELL = process.env.SHELL || "/bin/zsh";
+const AGENT_PTY = "agent";
+const PTY_ID_RE = /^[a-z0-9][a-z0-9-]{0,32}$/;
+const SIDECHAT_MAX_TOKENS = 4096;
+const MAX_BODY_BYTES = 1_000_000;
+const CALLS_MAX = 400;
 
-/** Read a JSON request body. */
+/**
+ * Reject cross-origin requests to these loopback routes. A same-origin fetch
+ * from the DSH web page carries Origin=own host; the native (main-process)
+ * fetch carries no Origin at all. A foreign page's POST always carries a
+ * foreign Origin — that is the blind-POST attack we block. Missing Origin is
+ * allowed (trusted native caller); present-and-mismatched is rejected.
+ */
+function sameOrigin(req) {
+  const origin = req.headers.origin || req.headers.referer;
+  if (!origin) return true;
+  try {
+    return new URL(origin).host === (req.headers.host || "");
+  } catch {
+    return false;
+  }
+}
+
+/** Read a JSON request body, capped to guard against memory-DoS. */
 function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
-    req.on("data", (c) => chunks.push(c));
+    let size = 0;
+    req.on("data", (c) => {
+      size += c.length;
+      if (size > MAX_BODY_BYTES) {
+        reject(new Error("request body too large"));
+        req.destroy();
+        return;
+      }
+      chunks.push(c);
+    });
     req.on("end", () => {
       try {
         resolve(JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}"));
@@ -50,41 +84,50 @@ export function apply(ctx) {
   const calls = new Map();
   let cwd = null;
 
-  // ── shared PTY (agent + panel) ──────────────────────────────────────────
-  let ptyProcess = null;
-  let outSeq = 0;
-  const outLog = []; // { seq, data }
-  let lastOutAt = 0;
-  let activeCollector = null; // one in-flight terminal_send output sink
+  // ── PTY sessions (agent-shared + local tabs) ────────────────────────────
+  /** id → { proc, outSeq, outLog: {seq, data}[] } */
+  const ptys = new Map();
 
-  const pushOut = (data) => {
-    outLog.push({ seq: outSeq++, data });
-    lastOutAt = Date.now();
-    if (activeCollector) activeCollector(data);
-    if (outLog.length > PTY_OUT_MAX) outLog.shift();
-  };
-
-  function ensurePty(spawnCwd) {
-    if (ptyProcess) return true;
+  function ensurePty(id, spawnCwd, cols, rows) {
+    const existing = ptys.get(id);
+    if (existing) return existing;
+    let proc;
     try {
       const pty = require("node-pty");
-      ptyProcess = pty.spawn(DEFAULT_SHELL, [], {
+      proc = pty.spawn(DEFAULT_SHELL, [], {
         name: "xterm-256color",
-        cols: 120,
-        rows: 32,
+        cols: cols || 120,
+        rows: rows || 32,
         cwd: spawnCwd || homedir(),
         env: { ...process.env, TERM: "xterm-256color" },
       });
     } catch (err) {
       console.error("[dsh-gui-bridge] pty spawn failed:", err.message);
-      return false;
+      return null;
     }
-    ptyProcess.onData((d) => pushOut(d));
-    ptyProcess.onExit(() => {
-      ptyProcess = null;
-      pushOut("\r\n\x1b[90m[terminal exited]\x1b[0m\r\n");
+    const entry = { proc, outSeq: 0, outLog: [] };
+    const pushOut = (data) => {
+      entry.outLog.push({ seq: entry.outSeq++, data });
+      if (entry.outLog.length > PTY_OUT_MAX) entry.outLog.shift();
+    };
+    proc.onData(pushOut);
+    proc.onExit(() => {
+      ptys.delete(id);
+      // keep the tail visible on next open of the same id
     });
-    return true;
+    ptys.set(id, entry);
+    return entry;
+  }
+
+  function closePty(id) {
+    const entry = ptys.get(id);
+    if (!entry) return;
+    ptys.delete(id);
+    try {
+      entry.proc.kill();
+    } catch {
+      /* already dead */
+    }
   }
 
   // ── activity capture (files / web) ──────────────────────────────────────
@@ -133,7 +176,12 @@ export function apply(ctx) {
       } else if (name === "web_fetch") {
         activity = { kind: "web", type: "fetch", url: args.url ?? "" };
       }
-      if (activity) calls.set(data.callId, push(activity));
+      if (activity) {
+        calls.set(data.callId, push(activity));
+        // Bound the pairing map: unmatched calls (interrupted turns, errors
+        // with no tool/result) would otherwise leak. Drop the oldest.
+        if (calls.size > CALLS_MAX) calls.delete(calls.keys().next().value);
+      }
     } else if (event.type === "tool/result") {
       const callId = data.callId ?? data.message?.callId;
       const activity = calls.get(callId);
@@ -171,90 +219,201 @@ export function apply(ctx) {
       },
       render: (_args, value) => [{ type: "text", text: value.content }],
     },
-    isConcurrencySafe: () => true,
+    // Not concurrency-safe: it writes raw keystrokes into one shared PTY, so
+    // the engine must serialize calls (two concurrent commands would interleave
+    // in the same line). Output is read back by seq range, not a shared sink.
     async execute(args, exec) {
       const sessionCwd = exec?.agent?.session?.header?.cwd;
-      if (!ensurePty(sessionCwd)) return { content: "[terminal unavailable]" };
+      const entry = ensurePty(AGENT_PTY, sessionCwd);
+      if (!entry) return { content: "[terminal unavailable]" };
       const started = Date.now();
       const timeout = args.timeoutMs ?? 60000;
-      let buf = "";
+      // Read this command's output from the ring buffer by seq, so it never
+      // depends on a shared collector another call could clobber.
+      const fromSeq = entry.outSeq;
+      const collect = () =>
+        entry.outLog.filter((c) => c.seq >= fromSeq).map((c) => c.data).join("");
+      let lastLen = 0;
       let last = Date.now();
-      activeCollector = (data) => {
-        buf += data;
-        last = Date.now();
-      };
-      try {
-        ptyProcess.write(`${args.command}\r`);
-        await new Promise((resolve) => {
-          const timer = setInterval(() => {
-            const now = Date.now();
-            const quiet = buf.length > 0 && now - last > 700;
-            if (quiet || now - started > timeout) {
-              clearInterval(timer);
-              resolve();
-            }
-          }, 100);
-        });
-      } finally {
-        activeCollector = null;
-      }
-      return { content: buf };
+      entry.proc.write(`${args.command}\r`);
+      await new Promise((resolve) => {
+        const timer = setInterval(() => {
+          const len = collect().length;
+          if (len !== lastLen) {
+            lastLen = len;
+            last = Date.now();
+          }
+          const now = Date.now();
+          const quiet = len > 0 && now - last > 700;
+          if (quiet || now - started > timeout) {
+            clearInterval(timer);
+            resolve();
+          }
+        }, 100);
+      });
+      return { content: collect() };
     },
   }));
+
+  // ── side chat: one-shot streamed completion over the default model ──────
+  async function handleSidechat(req, res) {
+    let body;
+    try {
+      body = await readBody(req);
+    } catch {
+      json(res, { error: "invalid JSON body" }, 400);
+      return;
+    }
+    const history = Array.isArray(body.messages) ? body.messages.slice(-40) : [];
+    if (history.length === 0 || typeof history[history.length - 1]?.text !== "string") {
+      json(res, { error: "messages required" }, 400);
+      return;
+    }
+    const selection = ctx.get("agentDefaultModel")?.currentSelection?.();
+    if (!selection?.provider || !selection?.model) {
+      json(res, { error: "尚未配置默认模型（设置 → 模型）" }, 409);
+      return;
+    }
+    const messages = history.map((m) =>
+      m.role === "assistant"
+        ? createAssistantMessage({ content: [{ type: "text", text: String(m.text) }] })
+        : createUserMessage({
+            content: [{ type: "text", text: String(m.text) }],
+            source: { kind: "plugin", plugin: "dsh-gui-bridge" },
+          }),
+    );
+    const abort = new AbortController();
+    req.on("close", () => abort.abort());
+    // NOTE: no sessionId — auxiliary calls stamped with a live session's id
+    // get routed into that session's replay cursor and deadlock.
+    const options = deepFreeze({
+      provider: selection.provider,
+      model: selection.model,
+      messages,
+      system:
+        "你是 Dsh GUI 右侧面板里的轻量侧边聊天助手。回答简洁、直接、有用；用户用什么语言你就用什么语言。这是临时聊天，不涉及主会话的任务状态。",
+      maxTokens: SIDECHAT_MAX_TOKENS,
+      signal: abort.signal,
+    });
+    res.writeHead(200, {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Cache-Control": "no-store",
+      "Transfer-Encoding": "chunked",
+    });
+    try {
+      let wrote = false;
+      const assembler = new BlockAssembler();
+      for await (const chunk of ctx.llm.stream(options)) {
+        assembler.push(chunk);
+        if (chunk.type === "text-delta" && chunk.text !== "") {
+          res.write(chunk.text);
+          wrote = true;
+        }
+      }
+      // Fallback for providers that only emit whole blocks (no deltas).
+      if (!wrote) {
+        const text = assembler
+          .blocks()
+          .map((b) => (b.type === "text" ? b.text : ""))
+          .join("");
+        res.write(text);
+      }
+    } catch (err) {
+      if (!res.writableEnded) res.write(`\n[出错了: ${err.message}]`);
+    } finally {
+      res.end();
+    }
+  }
 
   // ── HTTP routes (loopback only) ─────────────────────────────────────────
   ctx.inject(["webServer"], (httpCtx) => {
     httpCtx.effect(() => {
+      const ptyIdOf = (raw) => {
+        const id = typeof raw === "string" && raw !== "" ? raw : AGENT_PTY;
+        return PTY_ID_RE.test(id) ? id : null;
+      };
+      // Reject cross-origin callers before any side effect / data read.
+      const guard = (handler) => async (req, res) => {
+        if (!sameOrigin(req)) return json(res, { error: "forbidden" }, 403);
+        return handler(req, res);
+      };
       const disposers = [
         httpCtx.webServer.register({
           kind: "exact",
           path: "/dsh-gui/state",
-          handler: async (_req, res) => json(res, { cwd, home: homedir(), activities }),
+          handler: guard(async (_req, res) => json(res, { cwd, home: homedir(), activities })),
         }),
         httpCtx.webServer.register({
           kind: "exact",
           path: "/dsh-gui/terminal/open",
-          handler: async (req, res) => {
+          handler: guard(async (req, res) => {
             const body = await readBody(req).catch(() => ({}));
-            if (!ensurePty(cwd)) return json(res, { ok: false }, 500);
+            const id = ptyIdOf(body.id);
+            if (id === null) return json(res, { ok: false, error: "bad id" }, 400);
+            const entry = ensurePty(id, cwd, body.cols, body.rows);
+            if (!entry) return json(res, { ok: false }, 500);
             if (body.cols && body.rows) {
               try {
-                ptyProcess.resize(body.cols, body.rows);
+                entry.proc.resize(body.cols, body.rows);
               } catch { /* ignore */ }
             }
-            json(res, { ok: true, seq: outSeq });
-          },
+            json(res, { ok: true, seq: entry.outSeq });
+          }),
         }),
         httpCtx.webServer.register({
           kind: "exact",
           path: "/dsh-gui/terminal/input",
-          handler: async (req, res) => {
+          handler: guard(async (req, res) => {
             const body = await readBody(req).catch(() => ({}));
-            if (ptyProcess && typeof body.data === "string") ptyProcess.write(body.data);
+            const id = ptyIdOf(body.id);
+            const entry = id === null ? undefined : ptys.get(id);
+            if (entry && typeof body.data === "string") entry.proc.write(body.data);
             json(res, { ok: true });
-          },
+          }),
         }),
         httpCtx.webServer.register({
           kind: "exact",
           path: "/dsh-gui/terminal/resize",
-          handler: async (req, res) => {
+          handler: guard(async (req, res) => {
             const body = await readBody(req).catch(() => ({}));
-            if (ptyProcess && body.cols && body.rows) {
+            const id = ptyIdOf(body.id);
+            const entry = id === null ? undefined : ptys.get(id);
+            if (entry && body.cols && body.rows) {
               try {
-                ptyProcess.resize(body.cols, body.rows);
+                entry.proc.resize(body.cols, body.rows);
               } catch { /* ignore */ }
             }
             json(res, { ok: true });
-          },
+          }),
+        }),
+        httpCtx.webServer.register({
+          kind: "exact",
+          path: "/dsh-gui/terminal/close",
+          handler: guard(async (req, res) => {
+            const body = await readBody(req).catch(() => ({}));
+            const id = ptyIdOf(body.id);
+            // The agent terminal outlives its tab: the model may still use it.
+            if (id !== null && id !== AGENT_PTY) closePty(id);
+            json(res, { ok: true });
+          }),
         }),
         httpCtx.webServer.register({
           kind: "exact",
           path: "/dsh-gui/terminal/out",
-          handler: async (req, res) => {
-            const since = Number(new URL(req.url, "http://x").searchParams.get("since") ?? -1);
-            const chunks = outLog.filter((c) => c.seq > since).map((c) => c.data);
-            json(res, { seq: outSeq, chunks });
-          },
+          handler: guard(async (req, res) => {
+            const params = new URL(req.url, "http://x").searchParams;
+            const id = ptyIdOf(params.get("id") ?? undefined);
+            const since = Number(params.get("since") ?? -1);
+            const entry = id === null ? undefined : ptys.get(id);
+            if (!entry) return json(res, { seq: 0, chunks: [] });
+            const chunks = entry.outLog.filter((c) => c.seq > since).map((c) => c.data);
+            json(res, { seq: entry.outSeq, chunks });
+          }),
+        }),
+        httpCtx.webServer.register({
+          kind: "exact",
+          path: "/dsh-gui/sidechat",
+          handler: guard(handleSidechat),
         }),
       ];
       return () => disposers.forEach((d) => d());
