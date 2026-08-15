@@ -35,7 +35,7 @@ jobs:
         run: PLAYWRIGHT_BROWSERS_PATH=resources/browsers npx playwright install chromium
 
       - name: Build dmg + zip (unsigned)
-        run: CSC_IDENTITY_AUTO_DISCOVERY=false npx electron-builder --mac -c.mac.notarize=false
+        run: CSC_IDENTITY_AUTO_DISCOVERY=false npx electron-builder --mac -c.mac.notarize=false --publish never
 
       - name: Upload artifacts to the Release
         env:
