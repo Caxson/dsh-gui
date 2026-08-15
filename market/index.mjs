@@ -158,6 +158,12 @@ function dedupe(rows) {
   })
 }
 
+/** dsh-ecosystem filter: keep rows that plausibly belong to the DSH world. */
+function dshOnly(rows) {
+  const re = /\bdsh\b|dsh-|deepseek/i
+  return rows.filter((r) => re.test(`${r.name} ${r.description}`))
+}
+
 export function apply(ctx) {
   const resolveMetadata = makeMetadataResolver()
   let installing = false
@@ -255,10 +261,12 @@ export function apply(ctx) {
     handler: async (req, res) => {
       const params = new URL(req.url, 'http://x').searchParams
       const source = params.get('source') === 'github' ? 'github' : 'npm'
+      const strict = params.get('strict') !== '0'
       const query = (params.get('q') ?? '').trim() || 'dsh-plugin'
       try {
         const rows = source === 'github' ? await searchGithub(query) : await searchNpm(query)
-        sendJson(res, 200, { results: dedupe(rows) })
+        const deduped = dedupe(rows)
+        sendJson(res, 200, { results: strict ? dshOnly(deduped) : deduped })
       } catch (err) {
         sendJson(res, 502, { error: `搜索失败: ${err.message}` })
       }

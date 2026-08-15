@@ -156,6 +156,7 @@ window.__ModuleLoader__.load({
       var installed = installedPair[0]
       var setInstalled = installedPair[1]
       var sourcePair = react.useState('npm')
+      var strictPair = react.useState(true)
       var queryPair = react.useState('')
       var resultsPair = react.useState(null)
       var searchingPair = react.useState(false)
@@ -174,7 +175,9 @@ window.__ModuleLoader__.load({
       function runSearch() {
         searchingPair[1](true)
         resultsPair[1](null)
-        var url = '/api/market/search?source=' + sourcePair[0] + '&q=' + encodeURIComponent(queryPair[0])
+        var url = '/api/market/search?source=' + sourcePair[0] +
+          '&strict=' + (strictPair[0] ? '1' : '0') +
+          '&q=' + encodeURIComponent(queryPair[0])
         fetch(url, { cache: 'no-store' })
           .then(function (res) { return res.json() })
           .then(function (data) {
@@ -220,7 +223,13 @@ window.__ModuleLoader__.load({
             onKeyDown: function (e) { if (e.key === 'Enter') runSearch() },
           }),
           h('button', { style: S.btn, disabled: searchingPair[0], onClick: runSearch },
-            searchingPair[0] ? '…' : t('searchBtn'))
+            searchingPair[0] ? '…' : t('searchBtn')),
+          h('label', { style: Object.assign({}, S.dim, { display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer' }) },
+            h('input', {
+              type: 'checkbox', checked: strictPair[0],
+              onChange: function (e) { strictPair[1](e.currentTarget.checked) },
+            }),
+            '仅 dsh 生态')
         ),
         installDonePair[0]
           ? h('div', { style: { marginTop: 8 } },
