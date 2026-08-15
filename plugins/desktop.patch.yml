@@ -35,3 +35,9 @@
 - insert:
     - id: desktop-market
       name: 'dsh-gui-market'
+
+# Dsh GUI import: cross-tool session import — search local Claude Code /
+# Codex / pi agent transcripts, compress one, continue it as a DSH session.
+- insert:
+    - id: desktop-import
+      name: 'dsh-gui-import'

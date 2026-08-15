@@ -1,0 +1,18 @@
+# Track upstream DeepSeek Harness releases: one grouped PR per day at most,
+# covering the whole @deepseek-ai/* engine family. The smoke workflow gates it.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: daily
+      time: "09:00"
+      timezone: Asia/Shanghai
+    groups:
+      dsh-engine:
+        patterns:
+          - "@deepseek-ai/*"
+    allow:
+      - dependency-name: "@deepseek-ai/*"
+    labels:
+      - engine-sync

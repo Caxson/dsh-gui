@@ -1,0 +1,22 @@
+{
+  "name": "dsh-gui-import",
+  "version": "0.1.0",
+  "description": "Dsh GUI 跨工具会话导入 — 检索本机 Claude Code / Codex / pi agent 历史会话，压缩理解后接续为新的 DSH 会话",
+  "license": "MIT",
+  "type": "module",
+  "main": "./index.mjs",
+  "exports": {
+    ".": "./index.mjs",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web"
+    }
+  },
+  "peerDependencies": {
+    "cordis": "^4.0.0-rc.7",
+    "react": "^18.2.0"
+  }
+}

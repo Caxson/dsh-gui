@@ -50,6 +50,7 @@
     "dsh-gui-bridge": "file:bridge",
     "dsh-gui-browser": "file:browser",
     "dsh-gui-flow": "file:flow",
+    "dsh-gui-import": "file:import",
     "dsh-gui-market": "file:market",
     "electron-updater": "^6.8.9",
     "playwright": "^1.62.1"

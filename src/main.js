@@ -442,7 +442,7 @@ function seedFlowPreset(dshHome) {
  */
 function linkBridgeModules(dshHome) {
   const modulesDir = join(dshHome, 'profiles', 'node_modules');
-  for (const pkg of ['dsh-gui-bridge', 'dsh-gui-browser', 'dsh-gui-market', 'dsh-gui-flow']) {
+  for (const pkg of ['dsh-gui-bridge', 'dsh-gui-browser', 'dsh-gui-market', 'dsh-gui-flow', 'dsh-gui-import']) {
     const linkPath = join(modulesDir, pkg);
     const target = join(APP_ROOT, 'node_modules', pkg);
     if (!existsSync(target) || existsSync(linkPath)) continue;
