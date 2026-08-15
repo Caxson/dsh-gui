@@ -13,10 +13,11 @@ injected through DSH's own plugin/patch system.
 ## 特性 / Features
 
 - 🖥️ 原生 macOS 窗口，深色 Codex 风格；完整 DSH 能力（多会话、工具调用、工作区、Goal、子代理）
-- 📋 **Codex 式右侧面板**（Cmd+B 呼出，默认隐藏）：
-  - **终端** — 与 agent 共享同一个 PTY，agent 跑的每条命令你都实时看得见
-  - **文件** — 改动按文件聚合成卡片，真·逐行 diff（LCS + 上下文折叠）、+N/−N 统计、展开/收起
+- 📋 **Codex 式右侧面板**（Cmd+B 呼出，默认隐藏；浏览器式多标签，可新建/关闭/弹出为独立窗口）：
+  - **终端** — 与 agent 共享同一个 PTY（agent 跑的每条命令实时可见），可再开多个本地终端标签（⌘T）
+  - **文件** — 改动按文件聚合成卡片，真·逐行 diff（LCS + 上下文折叠）、+N/−N 统计、展开/收起（⌘P）
   - **浏览器** — agent 驱动的无头 Chromium 实时画面 + 搜索/抓取活动流
+  - **侧边聊天** — 临时轻量聊天（⌥⌘S），流式回复，关闭应用即消失，不打扰主会话
 - 🔌 桌面行为全部以 DSH 插件（profile patch overlay）实现：`bridge/`（活动采集 + 共享 PTY + `terminal_send` 工具）、`browser/`（实时浏览器）
 - 🔒 引擎只绑定 127.0.0.1，外部链接自动走系统浏览器
 - 🔄 自动更新走 GitHub Releases；大陆用户可用 `DSH_GUI_UPDATE_URL` 指向镜像源
@@ -34,6 +35,10 @@ injected through DSH's own plugin/patch system.
    ```
 
 4. 打开后进入 **设置 → 模型** 填入 DeepSeek（或任意 OpenAI 兼容）API Key，开聊
+
+> 数据目录：机器上已有 `~/.dsh`（用过 dsh CLI / `dsh web`）时直接复用它——
+> 会话、模型、插件与命令行侧完全同步；没有才使用
+> `~/Library/Application Support/Dsh GUI/dsh-home`。`DSH_GUI_HOME` 环境变量可覆盖。
 
 ### 为什么会提示「已损坏，无法打开」？
 

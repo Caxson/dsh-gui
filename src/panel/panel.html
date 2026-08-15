@@ -9,46 +9,47 @@
 </head>
 <body>
   <header class="panel-header">
-    <nav class="segmented" role="tablist">
-      <button data-tab="terminal" class="seg active" role="tab">终端</button>
-      <button data-tab="files" class="seg" role="tab">文件<span id="files-count" class="count" hidden></span></button>
-      <button data-tab="web" class="seg" role="tab">浏览器</button>
-    </nav>
-    <button id="collapse-btn" class="icon-btn" title="收起面板 (Cmd+B)" aria-label="收起面板">
+    <nav id="tabstrip" class="tabstrip" role="tablist"></nav>
+    <button id="new-tab-btn" class="icon-btn" title="新建标签页" aria-label="新建标签页">
+      <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <path d="M8 3.2v9.6M3.2 8h9.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+    </button>
+    <div class="header-spacer"></div>
+    <button id="popout-btn" class="icon-btn" title="在独立窗口中打开" aria-label="弹出面板">
       <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-        <path d="M6 3.5 10.5 8 6 12.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M6.5 3.5H3.5v9h9V9.5M9.5 3.5h3v3M12.5 3.5 8 8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </button>
+    <button id="collapse-btn" class="icon-btn" title="收起面板 (Cmd+B)" aria-label="收起面板">
+      <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <rect x="2.2" y="3" width="11.6" height="10" rx="2" stroke="currentColor" stroke-width="1.4"/>
+        <path d="M9.8 3v10" stroke="currentColor" stroke-width="1.4"/>
       </svg>
     </button>
   </header>
 
-  <section id="terminal" class="pane active" role="tabpanel">
-    <div id="term"></div>
-    <footer id="term-hint" class="statusbar"></footer>
-  </section>
+  <div id="newtab-menu" class="menu" hidden>
+    <button class="menu-item" data-type="terminal">
+      <span class="menu-icon">❯_</span>终端<span class="menu-kbd">⌘T</span>
+    </button>
+    <button class="menu-item" data-type="web">
+      <span class="menu-icon">◐</span>浏览器
+    </button>
+    <button class="menu-item" data-type="files">
+      <span class="menu-icon">±</span>文件<span class="menu-kbd">⌘P</span>
+    </button>
+    <button class="menu-item" data-type="sidechat">
+      <span class="menu-icon">💬</span>侧边聊天<span class="menu-kbd">⌥⌘S</span>
+    </button>
+  </div>
 
-  <section id="files" class="pane" role="tabpanel">
-    <div id="files-list" class="scroll"></div>
-  </section>
-
-  <section id="web" class="pane" role="tabpanel">
-    <div id="browser-bar" class="urlbar"></div>
-    <div id="browser-view" class="browser-view">
-      <img id="browser-img" alt="" />
-      <div id="browser-empty" class="empty">
-        <div class="empty-glyph">◐</div>
-        <div>浏览器未启动</div>
-        <div class="empty-sub">agent 调用 browser 工具后，这里会显示实时画面</div>
-      </div>
-    </div>
-    <div class="pane-split">
-      <div class="pane-title">活动记录</div>
-      <div id="web-list" class="scroll"></div>
-    </div>
-  </section>
+  <main id="panes" class="panes"></main>
 
   <script src="vendor/xterm.js"></script>
   <script src="vendor/addon-fit.js"></script>
   <script src="diff.js"></script>
+  <script src="panes.js"></script>
   <script src="panel.js"></script>
 </body>
 </html>

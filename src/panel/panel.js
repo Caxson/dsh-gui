@@ -1,340 +1,260 @@
 'use strict';
 
-/* Dsh GUI right panel — Codex-style 终端 / 文件 / 浏览器 tabs. */
+/* Dsh GUI right panel — Codex-style browser tabs over the panes.
+   Tab types: terminal (multi, 'agent' first), web/files (singleton),
+   sidechat (multi, ephemeral). */
 
-// ── terminal ──────────────────────────────────────────────────────────────
-const FitAddonCtor =
-  (window.FitAddon && window.FitAddon.FitAddon) || window.FitAddon;
+const tabstrip = document.getElementById('tabstrip');
+const panesHost = document.getElementById('panes');
+const newTabBtn = document.getElementById('new-tab-btn');
+const newTabMenu = document.getElementById('newtab-menu');
 
-const term = new window.Terminal({
-  fontSize: 12,
-  fontFamily: '"SF Mono", ui-monospace, Menlo, monospace',
-  lineHeight: 1.25,
-  cursorBlink: true,
-  cursorStyle: 'bar',
-  scrollback: 5000,
-  theme: {
-    background: '#0b0d12',
-    foreground: '#d7dde8',
-    cursor: '#5b7cff',
-    cursorAccent: '#0b0d12',
-    selectionBackground: 'rgba(91, 124, 255, 0.30)',
-    black: '#1c212e',
-    red: '#f85149',
-    green: '#3fb950',
-    yellow: '#d29922',
-    blue: '#5b7cff',
-    magenta: '#b48cf2',
-    cyan: '#67e8f9',
-    white: '#d7dde8',
-    brightBlack: '#566079',
-    brightRed: '#ffa198',
-    brightGreen: '#7ee2a8',
-    brightYellow: '#e3b341',
-    brightBlue: '#93b4ff',
-    brightMagenta: '#d2b6f8',
-    brightCyan: '#a5f3fc',
-    brightWhite: '#f1f5fb',
-  },
+const TAB_META = {
+  terminal: { icon: '❯_', label: '终端', multi: true },
+  web: { icon: '◐', label: '浏览器', multi: false },
+  files: { icon: '±', label: '文件', multi: false },
+  sidechat: { icon: '💬', label: '侧边聊天', multi: true },
+};
+
+const tabs = []; // {tabId, type, title, pane}
+let activeTabId = null;
+let tabSeq = 0;
+let localPtySeq = 0;
+let chatSeq = 0;
+let latestState = null;
+
+function tabById(tabId) {
+  return tabs.find((t) => t.tabId === tabId);
+}
+
+function countType(type) {
+  return tabs.filter((t) => t.type === type).length;
+}
+
+function makePane(type) {
+  if (type === 'terminal') {
+    const ptyId = countType('terminal') === 0 ? 'agent' : `local-${++localPtySeq}`;
+    return window.dshPanes.createTerminalPane(ptyId);
+  }
+  if (type === 'files') return window.dshPanes.createFilesPane();
+  if (type === 'web') return window.dshPanes.createWebPane();
+  return window.dshPanes.createSidechatPane(`chat-${++chatSeq}`);
+}
+
+function syncTerminals() {
+  const ids = tabs.filter((t) => t.type === 'terminal').map((t) => t.pane.ptyId);
+  window.dshPanel.openTerminals(ids);
+}
+
+function openTab(type, activate = true) {
+  const meta = TAB_META[type];
+  if (!meta.multi) {
+    const existing = tabs.find((t) => t.type === type);
+    if (existing) {
+      if (activate) activateTab(existing.tabId);
+      return existing;
+    }
+  }
+  const pane = makePane(type);
+  const n = countType(type);
+  const tab = {
+    tabId: `tab-${++tabSeq}`,
+    type,
+    title: n === 0 ? meta.label : `${meta.label} ${n + 1}`,
+    pane,
+  };
+  tabs.push(tab);
+  pane.el.classList.remove('active');
+  panesHost.appendChild(pane.el);
+  if (latestState && pane.renderState) pane.renderState(latestState.activities, latestState.home);
+  if (type === 'terminal') syncTerminals();
+  renderTabs();
+  if (activate) activateTab(tab.tabId);
+  return tab;
+}
+
+function closeTab(tabId) {
+  const idx = tabs.findIndex((t) => t.tabId === tabId);
+  if (idx < 0) return;
+  const [tab] = tabs.splice(idx, 1);
+  if (tab.type === 'terminal' && tab.pane.ptyId !== 'agent') {
+    window.dshPanel.ptyClose(tab.pane.ptyId);
+  }
+  tab.pane.el.remove();
+  tab.pane.dispose();
+  if (tab.type === 'terminal') syncTerminals();
+  if (activeTabId === tab.tabId) {
+    const next = tabs[idx] ?? tabs[idx - 1];
+    activeTabId = null;
+    if (next) activateTab(next.tabId);
+    else {
+      renderTabs();
+      window.dshPanel.tabChanged('none');
+    }
+  } else {
+    renderTabs();
+  }
+}
+
+function activateTab(tabId) {
+  const tab = tabById(tabId);
+  if (!tab) return;
+  activeTabId = tabId;
+  for (const t of tabs) t.pane.el.classList.toggle('active', t.tabId === tabId);
+  renderTabs();
+  window.dshPanel.tabChanged(tab.type);
+  tab.pane.onShow();
+}
+
+function renderTabs() {
+  tabstrip.replaceChildren();
+  for (const tab of tabs) {
+    const chip = document.createElement('button');
+    chip.className = `tab${tab.tabId === activeTabId ? ' active' : ''}`;
+    chip.setAttribute('role', 'tab');
+    chip.title = tab.title;
+
+    const icon = document.createElement('span');
+    icon.className = 'tab-icon';
+    icon.textContent = TAB_META[tab.type].icon;
+    const label = document.createElement('span');
+    label.className = 'tab-label';
+    label.textContent = tab.title;
+    const close = document.createElement('span');
+    close.className = 'tab-close';
+    close.textContent = '×';
+    close.title = '关闭标签页';
+    close.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeTab(tab.tabId);
+    });
+
+    chip.append(icon, label, close);
+    chip.addEventListener('click', () => activateTab(tab.tabId));
+    tabstrip.appendChild(chip);
+  }
+}
+
+// ── new-tab menu ──────────────────────────────────────────────────────────
+function hideMenu() {
+  newTabMenu.hidden = true;
+}
+
+newTabBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (!newTabMenu.hidden) return hideMenu();
+  const rect = newTabBtn.getBoundingClientRect();
+  newTabMenu.style.left = `${Math.min(rect.left, window.innerWidth - 190)}px`;
+  newTabMenu.style.top = `${rect.bottom + 6}px`;
+  newTabMenu.hidden = false;
 });
-let fit = null;
-if (FitAddonCtor) {
-  fit = new FitAddonCtor();
-  term.loadAddon(fit);
-}
-term.open(document.getElementById('term'));
-refit();
-term.onData((d) => window.dshPanel.ptyInput(d));
-term.onResize(({ cols, rows }) => window.dshPanel.ptyResize(cols, rows));
-window.dshPanel.ptyOpen(term.cols, term.rows);
 
-window.dshPanel.onPtyData((d) => term.write(d));
-window.dshPanel.onPtyExit(() => term.writeln('\r\n\x1b[90m[终端会话已结束]\x1b[0m'));
-
-function refit() {
-  if (!fit) return;
-  try {
-    fit.fit();
-  } catch {
-    /* container not laid out yet — refit on next tab focus */
-  }
+document.addEventListener('click', hideMenu);
+for (const item of newTabMenu.querySelectorAll('.menu-item')) {
+  item.addEventListener('click', (e) => {
+    e.stopPropagation();
+    hideMenu();
+    openTab(item.dataset.type);
+  });
 }
 
-window.addEventListener('resize', refit);
-
-// ── tabs ──────────────────────────────────────────────────────────────────
-const paneIds = { terminal: 'terminal', files: 'files', web: 'web' };
-const tabButtons = document.querySelectorAll('.segmented .seg');
-
-// Global on purpose: the smoke probe drives tabs via executeJavaScript.
-function switchTab(tab) {
-  for (const btn of tabButtons) {
-    btn.classList.toggle('active', btn.dataset.tab === tab);
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') hideMenu();
+  const meta = e.metaKey || e.ctrlKey;
+  if (!meta) return;
+  const key = e.key.toLowerCase();
+  if (key === 't' && !e.altKey) {
+    e.preventDefault();
+    openTab('terminal');
+  } else if (key === 'p' && !e.altKey) {
+    e.preventDefault();
+    openTab('files');
+  } else if (key === 's' && e.altKey) {
+    e.preventDefault();
+    openTab('sidechat');
   }
-  for (const [key, id] of Object.entries(paneIds)) {
-    document.getElementById(id).classList.toggle('active', key === tab);
-  }
-  if (tab === 'terminal') {
-    refit();
-    window.dshPanel.ptyOpen(term.cols, term.rows);
-    term.focus();
-  }
-  window.dshPanel.tabChanged(tab);
-}
+});
 
-for (const btn of tabButtons) {
-  btn.addEventListener('click', () => switchTab(btn.dataset.tab));
-}
-
+// ── window controls ───────────────────────────────────────────────────────
 document.getElementById('collapse-btn').addEventListener('click', () => {
   window.dshPanel.collapsePanel();
 });
+document.getElementById('popout-btn').addEventListener('click', () => {
+  window.dshPanel.popOut();
+});
 
-// ── shared render helpers ─────────────────────────────────────────────────
-function el(tag, cls, text) {
-  const node = document.createElement(tag);
-  if (cls) node.className = cls;
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
-
-function timeText(at) {
-  const d = new Date(at);
-  const pad = (v) => String(v).padStart(2, '0');
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-}
-
-const ACTION_LABEL = {
-  edit: '修改',
-  create: '新建',
-  write: '写入',
-  insert: '插入',
-  search: '搜索',
-  fetch: '抓取',
-};
-
-function badge(action) {
-  return el('span', `badge ${action}`, ACTION_LABEL[action] ?? action);
-}
-
-function emptyState(glyph, title, sub) {
-  const wrap = el('div', 'empty');
-  wrap.appendChild(el('div', 'empty-glyph', glyph));
-  wrap.appendChild(el('div', '', title));
-  if (sub) wrap.appendChild(el('div', 'empty-sub', sub));
-  return wrap;
-}
-
-// ── files pane: per-file cards with real diffs ────────────────────────────
-// Cache computed diffs by activity identity (path+at survives re-polls).
-const diffCache = new Map();
-// Paths the user explicitly toggled; wins over the auto-expand default.
-const userToggled = new Map();
-
-function computeEntryDiff(a) {
-  const key = `${a.path}@${a.at}#${a.action}`;
-  if (diffCache.has(key)) return diffCache.get(key);
-  let result = null;
-  if (a.action === 'edit' && (a.oldText !== undefined || a.newText !== undefined)) {
-    result = window.dshDiff.compute(a.oldText ?? '', a.newText ?? '');
-  } else if (a.action === 'create' || a.action === 'write') {
-    const lines = window.dshDiff.splitLines(a.newText ?? '');
-    result = {
-      rows: lines.slice(0, 120).map((text) => ({ kind: 'add', text })),
-      adds: lines.length,
-      dels: 0,
-      truncated: lines.length > 120 ? lines.length - 120 : 0,
-    };
-  }
-  diffCache.set(key, result);
-  if (diffCache.size > 600) {
-    diffCache.delete(diffCache.keys().next().value);
-  }
-  return result;
-}
-
-function diffBlock(diff) {
-  const pre = el('pre', 'diff');
-  const rows = diff.rows.slice(0, 300);
-  for (const row of rows) {
-    if (row.kind === 'skip') {
-      pre.appendChild(el('div', 'skip', `⋯ ${row.count} 行未更改`));
-    } else {
-      pre.appendChild(el('div', `row ${row.kind}`, row.text || ' '));
-    }
-  }
-  const hidden = diff.rows.length - rows.length + (diff.truncated ?? 0);
-  if (hidden > 0) {
-    pre.appendChild(el('div', 'skip', `⋯ 其余 ${hidden} 行已省略`));
-  }
-  return pre;
-}
-
-let homeDir = '';
-
-function splitPath(path) {
-  const idx = (path ?? '').lastIndexOf('/');
-  if (idx < 0) return { dir: '', name: path ?? '' };
-  let dir = path.slice(0, idx);
-  if (homeDir && dir.startsWith(homeDir)) dir = `~${dir.slice(homeDir.length)}`;
-  return { dir, name: path.slice(idx + 1) };
-}
-
-function groupFileActivities(acts) {
-  const groups = new Map();
-  for (const a of acts) {
-    if (a.kind !== 'file' || !a.path) continue;
-    let g = groups.get(a.path);
-    if (!g) {
-      g = { path: a.path, entries: [], adds: 0, dels: 0, latestAt: 0 };
-      groups.set(a.path, g);
-    }
-    g.entries.push(a);
-    g.latestAt = Math.max(g.latestAt, a.at);
-    const diff = computeEntryDiff(a);
-    if (diff) {
-      g.adds += diff.adds;
-      g.dels += diff.dels;
-    }
-  }
-  return [...groups.values()].sort((x, y) => y.latestAt - x.latestAt);
-}
-
-function fileCard(group, autoOpen) {
-  const open = userToggled.has(group.path) ? userToggled.get(group.path) : autoOpen;
-  const card = el('div', `file-card${open ? ' open' : ''}`);
-  const head = el('div', 'file-head');
-  head.appendChild(el('span', 'chev', '▶'));
-  const { dir, name } = splitPath(group.path);
-  head.appendChild(el('span', 'file-name', name));
-  head.appendChild(el('span', 'file-dir', dir));
-  if (group.adds) head.appendChild(el('span', 'stat add', `+${group.adds}`));
-  if (group.dels) head.appendChild(el('span', 'stat del', `−${group.dels}`));
-  head.addEventListener('click', () => {
-    const nowOpen = !card.classList.contains('open');
-    card.classList.toggle('open', nowOpen);
-    userToggled.set(group.path, nowOpen);
-  });
-  card.appendChild(head);
-
-  const body = el('div', 'file-body');
-  const entries = [...group.entries].sort((x, y) => y.at - x.at);
-  for (const a of entries) {
-    const entry = el('div', 'entry');
-    const meta = el('div', 'entry-meta');
-    meta.appendChild(badge(a.action));
-    meta.appendChild(el('span', 'time', timeText(a.at)));
-    entry.appendChild(meta);
-    const diff = computeEntryDiff(a);
-    if (diff && diff.rows.length) {
-      entry.appendChild(diffBlock(diff));
-    } else if (a.action === 'insert' && a.line !== undefined) {
-      entry.appendChild(el('div', 'note', `在第 ${a.line} 行插入内容`));
-    } else if (a.action === 'edit' && !diff) {
-      entry.appendChild(el('div', 'note', '改动过大，未展示逐行 diff'));
-    } else {
-      entry.appendChild(el('div', 'note', '（无内容详情）'));
-    }
-    body.appendChild(entry);
-  }
-  card.appendChild(body);
-  return card;
-}
-
-function renderFiles(acts) {
-  const container = document.getElementById('files-list');
-  const groups = groupFileActivities(acts ?? []);
-  const countEl = document.getElementById('files-count');
-  countEl.hidden = groups.length === 0;
-  countEl.textContent = String(groups.length);
-
-  const scrollTop = container.scrollTop;
-  container.replaceChildren();
-  if (groups.length === 0) {
-    container.appendChild(
-      emptyState('◇', '暂无文件变更', 'agent 编辑文件后，改动会按文件聚合显示在这里'),
-    );
-    return;
-  }
-  groups.forEach((g, i) => container.appendChild(fileCard(g, i === 0)));
-  container.scrollTop = scrollTop;
-}
-
-// ── web pane ──────────────────────────────────────────────────────────────
-function webCard(a) {
-  const card = el('div', 'web-card');
-  const head = el('div', 'web-head');
-  head.appendChild(badge(a.type));
-  head.appendChild(el('span', 'time', timeText(a.at)));
-  card.appendChild(head);
-  if (a.query) card.appendChild(el('div', 'web-query', a.query));
-  if (a.url) card.appendChild(el('div', 'web-query', a.url));
-  if (a.links && a.links.length) {
-    const wrap = el('div', 'web-links');
-    for (const link of a.links) {
-      const aEl = el('a', '', link);
-      aEl.href = link;
-      aEl.target = '_blank';
-      aEl.rel = 'noreferrer';
-      wrap.appendChild(aEl);
-    }
-    card.appendChild(wrap);
-  } else if (a.result) {
-    card.appendChild(el('div', 'web-result', a.result.slice(0, 400)));
-  }
-  return card;
-}
-
-function renderWeb(acts) {
-  const container = document.getElementById('web-list');
-  const items = (acts ?? []).filter((a) => a.kind === 'web').slice(-100).reverse();
-  const scrollTop = container.scrollTop;
-  container.replaceChildren();
-  if (items.length === 0) {
-    container.appendChild(emptyState('◇', '暂无浏览器活动'));
-    return;
-  }
-  for (const a of items) container.appendChild(webCard(a));
-  container.scrollTop = scrollTop;
-}
-
-// ── live browser view ─────────────────────────────────────────────────────
-window.dshPanel.onBrowserShot((s) => {
-  const img = document.getElementById('browser-img');
-  const empty = document.getElementById('browser-empty');
-  const bar = document.getElementById('browser-bar');
-  if (s.live && s.jpeg) {
-    img.src = 'data:image/jpeg;base64,' + s.jpeg;
-    img.style.display = 'block';
-    empty.style.display = 'none';
-    bar.textContent = [s.title, s.url].filter(Boolean).join(' — ');
-  } else {
-    img.style.display = 'none';
-    empty.style.display = 'flex';
-    bar.textContent = s.error ? `浏览器错误: ${s.error}` : '';
+// ── event routing ─────────────────────────────────────────────────────────
+window.dshPanel.onPtyData((ptyId, data) => {
+  for (const tab of tabs) {
+    if (tab.type === 'terminal' && tab.pane.ptyId === ptyId) tab.pane.write(data);
   }
 });
 
-// ── state stream ──────────────────────────────────────────────────────────
-// Skip re-render when the snapshot is unchanged so scroll and expansion
-// survive the 1.2s poll loop.
 let lastStateKey = '';
-
-function stateKey(s) {
+window.dshPanel.onState((s) => {
+  latestState = s;
+  const cwdText =
+    s.cwd && s.home && s.cwd.startsWith(s.home) ? `~${s.cwd.slice(s.home.length)}` : s.cwd ?? '';
+  for (const tab of tabs) {
+    if (tab.type === 'terminal' && tab.pane.ptyId === 'agent') tab.pane.setCwd(cwdText);
+  }
   const acts = s.activities ?? [];
   const last = acts[acts.length - 1];
-  return `${acts.length}:${last ? last.at : 0}:${JSON.stringify(s).length}`;
-}
-
-window.dshPanel.onState((s) => {
-  homeDir = s.home ?? homeDir;
-  const hint = document.getElementById('term-hint');
-  if (s.cwd) {
-    hint.textContent = homeDir && s.cwd.startsWith(homeDir) ? `~${s.cwd.slice(homeDir.length)}` : s.cwd;
-  }
-  const key = stateKey(s);
+  const key = `${acts.length}:${last ? last.at : 0}:${JSON.stringify(s).length}`;
   if (key === lastStateKey) return;
   lastStateKey = key;
-  renderFiles(s.activities);
-  renderWeb(s.activities);
+  for (const tab of tabs) {
+    if (tab.pane.renderState) tab.pane.renderState(acts, s.home ?? '');
+  }
 });
+
+window.dshPanel.onBrowserShot((shot) => {
+  for (const tab of tabs) {
+    if (tab.type === 'web') tab.pane.renderShot(shot);
+  }
+});
+
+window.dshPanel.onSidechatChunk((chatId, text, done, error) => {
+  for (const tab of tabs) {
+    if (tab.type === 'sidechat' && tab.pane.chatId === chatId) tab.pane.onChunk(text, done, error);
+  }
+});
+
+window.addEventListener('resize', () => {
+  const tab = tabById(activeTabId);
+  if (tab) tab.pane.onResize();
+});
+
+// ── boot + smoke probe surface ────────────────────────────────────────────
+openTab('terminal');
+
+window.__panelProbe = {
+  open(type) {
+    // Multi-instance types (terminal) must not spawn a second tab here —
+    // the probe wants the boot tab (the shared agent terminal) re-shown.
+    const existing = tabs.find((t) => t.type === type);
+    if (existing) activateTab(existing.tabId);
+    else openTab(type);
+  },
+  tabCount() { return tabs.length; },
+  agentTermText() {
+    const tab = tabs.find((t) => t.type === 'terminal' && t.pane.ptyId === 'agent');
+    if (!tab) return 'NO_TERM';
+    try {
+      const b = tab.pane.term.buffer.active;
+      const lines = [];
+      for (let i = 0; i < Math.min(b.length, 12); i++) lines.push(b.getLine(i).translateToString(true));
+      return lines.join('\n');
+    } catch (e) {
+      return 'ERR:' + e.message;
+    }
+  },
+  browserState() {
+    const empty = document.getElementById('browser-empty');
+    const bar = document.getElementById('browser-bar');
+    return {
+      emptyVisible: empty !== null && empty.style.display !== 'none',
+      bar: bar === null ? '' : bar.textContent,
+    };
+  },
+};

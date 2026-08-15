@@ -1,21 +1,30 @@
 'use strict';
 
+/* Dsh GUI panel preload — the only bridge between the sandboxed panel
+   renderer and the main process. All engine traffic is proxied by main. */
+
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('dshPanel', {
-  // state stream (main polls the DSH bridge and forwards)
-  onState: (cb) => ipcRenderer.on('panel:state', (_e, s) => cb(s)),
-  // terminal
-  onPtyData: (cb) => ipcRenderer.on('panel:pty-data', (_e, d) => cb(d)),
-  onPtyExit: (cb) => ipcRenderer.on('panel:pty-exit', (_e, d) => cb(d)),
-  ptyOpen: (cols, rows) => ipcRenderer.send('panel:pty-open', cols, rows),
-  ptyInput: (data) => ipcRenderer.send('panel:pty-input', data),
-  ptyResize: (cols, rows) => ipcRenderer.send('panel:pty-resize', cols, rows),
-  ptyClose: () => ipcRenderer.send('panel:pty-close'),
-  // live browser view
-  onBrowserShot: (cb) => ipcRenderer.on('panel:browser-shot', (_e, s) => cb(s)),
-  // tab switching (so main knows when to spawn/refresh the PTY)
+  // ── terminals (id-keyed; 'agent' is the shared agent terminal) ──────────
+  ptyOpen: (id, cols, rows) => ipcRenderer.send('panel:pty-open', id, cols, rows),
+  ptyInput: (id, data) => ipcRenderer.send('panel:pty-input', id, data),
+  ptyResize: (id, cols, rows) => ipcRenderer.send('panel:pty-resize', id, cols, rows),
+  ptyClose: (id) => ipcRenderer.send('panel:pty-close', id),
+  onPtyData: (cb) => ipcRenderer.on('panel:pty-data', (_e, id, data) => cb(id, data)),
+
+  // ── activity/state + live browser view ──────────────────────────────────
+  onState: (cb) => ipcRenderer.on('panel:state', (_e, state) => cb(state)),
+  onBrowserShot: (cb) => ipcRenderer.on('panel:browser-shot', (_e, shot) => cb(shot)),
+
+  // ── side chat (ephemeral, streamed) ─────────────────────────────────────
+  sidechatSend: (chatId, messages) => ipcRenderer.send('panel:sidechat-send', chatId, messages),
+  onSidechatChunk: (cb) =>
+    ipcRenderer.on('panel:sidechat-chunk', (_e, chatId, text, done, error) => cb(chatId, text, done, error)),
+
+  // ── window/tab plumbing ─────────────────────────────────────────────────
   tabChanged: (tab) => ipcRenderer.send('panel:tab', tab),
-  // collapse the whole panel (Codex-style hide; Cmd+B / menu restore it)
+  openTerminals: (ids) => ipcRenderer.send('panel:terminals', ids),
   collapsePanel: () => ipcRenderer.send('panel:collapse'),
+  popOut: () => ipcRenderer.send('panel:popout'),
 });

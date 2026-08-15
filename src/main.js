@@ -12,7 +12,7 @@
  *      injects the desktop skin, and manages lifecycle.
  */
 
-const { app, BaseWindow, WebContentsView, Menu, shell, dialog, ipcMain } = require('electron');
+const { app, BaseWindow, BrowserWindow, WebContentsView, Menu, shell, dialog, ipcMain } = require('electron');
 const { spawn } = require('node:child_process');
 const { join } = require('node:path');
 const { existsSync, mkdirSync, writeFileSync, readFileSync, symlinkSync } = require('node:fs');
@@ -122,19 +122,33 @@ let win = null;
 let mainView = null;
 let bootLog = [];
 
-// ── Codex-style right panel (终端 / 文件 / 浏览器) ──────────────────────────
+// ── Codex-style right panel (tabbed: 终端 / 文件 / 浏览器 / 侧边聊天) ────────
 const PANEL_WIDTH = 400;
 let panelView = null;
+let popupWin = null; // panel popped out into its own window
 // Hidden by default (Codex-style: surface the panel on demand via Cmd+B).
 // Smoke mode forces it visible so the layout probe can exercise both states.
 let panelVisible = SMOKE;
 let activeTab = 'terminal';
-let termSeq = 0;
+const termSeqs = new Map(); // pty id → last delivered output seq
+let openTerminalIds = ['agent'];
 let engineUrl = null;
 let stateTimer = null;
 let termTimer = null;
 let shotTimer = null;
 let lastBridgeState = null;
+
+/** All live panel renderers (docked view + popped-out window). */
+function panelTargets() {
+  const targets = [];
+  if (panelView && !panelView.webContents.isDestroyed()) targets.push(panelView.webContents);
+  if (popupWin && !popupWin.isDestroyed()) targets.push(popupWin.webContents);
+  return targets;
+}
+
+function sendToPanels(channel, ...args) {
+  for (const wc of panelTargets()) wc.send(channel, ...args);
+}
 
 function layoutViews() {
   if (!win || win.isDestroyed()) return;
@@ -164,7 +178,7 @@ function createPanelView() {
   panelView.webContents.on('console-message', (_e, level, message) => {
     if (level >= 2) console.warn('[panel]', message);
   });
-  panelView.setBackgroundColor('#0b0d12');
+  panelView.setBackgroundColor('#151517');
   panelView.webContents.loadFile(join(__dirname, 'panel', 'panel.html'));
   if (SMOKE) {
     panelView.webContents.on('did-finish-load', () => {
@@ -216,27 +230,35 @@ async function ptyPost(path, body) {
   }
 }
 
+let pollDebugAt = 0;
 async function pollTerminalOut() {
-  if (!engineUrl || activeTab !== 'terminal') {
-    if (process.env.DSH_GUI_DEBUG) console.log(`[pty-debug] poll skip url=${!!engineUrl} tab=${activeTab}`);
-    return;
+  let debugTick = false;
+  if (process.env.DSH_GUI_DEBUG && Date.now() - pollDebugAt > 2000) {
+    pollDebugAt = Date.now();
+    debugTick = true;
+    console.log(`[pty-debug] poll url=${!!engineUrl} targets=${panelTargets().length} ids=${JSON.stringify(openTerminalIds)}`);
   }
-  try {
-    const res = await fetch(`${engineUrl}/dsh-gui/terminal/out?since=${termSeq}`, { cache: 'no-store' });
-    if (!res.ok) {
-      if (process.env.DSH_GUI_DEBUG) console.log(`[pty-debug] out http ${res.status}`);
-      return;
+  if (!engineUrl || panelTargets().length === 0) return;
+  for (const id of openTerminalIds) {
+    try {
+      const since = termSeqs.get(id) ?? -1;
+      const res = await fetch(
+        `${engineUrl}/dsh-gui/terminal/out?id=${encodeURIComponent(id)}&since=${since}`,
+        { cache: 'no-store' },
+      );
+      if (!res.ok) {
+        if (process.env.DSH_GUI_DEBUG) console.log(`[pty-debug] out ${id} http ${res.status}`);
+        continue;
+      }
+      const data = await res.json();
+      termSeqs.set(id, data.seq);
+      if (debugTick) console.log(`[pty-debug] out ${id} seq=${data.seq} n=${data.chunks?.length ?? 'nil'}`);
+      if (data.chunks?.length) {
+        for (const chunk of data.chunks) sendToPanels('panel:pty-data', id, chunk);
+      }
+    } catch (err) {
+      if (process.env.DSH_GUI_DEBUG) console.log(`[pty-debug] out ${id} failed: ${err.message}`);
     }
-    const data = await res.json();
-    termSeq = data.seq;
-    if (process.env.DSH_GUI_DEBUG && data.chunks?.length) {
-      console.log(`[pty-debug] out seq=${data.seq} chunks=${data.chunks.length} panel=${!!panelView}`);
-    }
-    if (data.chunks?.length && panelView && !panelView.webContents.isDestroyed()) {
-      for (const chunk of data.chunks) panelView.webContents.send('panel:pty-data', chunk);
-    }
-  } catch (err) {
-    if (process.env.DSH_GUI_DEBUG) console.log(`[pty-debug] out failed: ${err.message}`);
   }
 }
 
@@ -246,9 +268,7 @@ async function pollBrowserShot() {
     const res = await fetch(`${engineUrl}/dsh-gui/browser/shot`, { cache: 'no-store' });
     if (!res.ok) return;
     const shot = await res.json();
-    if (panelView && !panelView.webContents.isDestroyed()) {
-      panelView.webContents.send('panel:browser-shot', shot);
-    }
+    sendToPanels('panel:browser-shot', shot);
   } catch {
     /* transient */
   }
@@ -260,32 +280,109 @@ async function pollBridgeState() {
     const res = await fetch(`${engineUrl}/dsh-gui/state`, { cache: 'no-store' });
     if (!res.ok) return;
     lastBridgeState = await res.json();
-    if (panelView && !panelView.webContents.isDestroyed()) {
-      panelView.webContents.send('panel:state', lastBridgeState);
-    }
+    sendToPanels('panel:state', lastBridgeState);
   } catch {
     /* engine not ready / restarted — next tick retries */
   }
 }
 
-function wirePanelIpc() {
-  ipcMain.on('panel:pty-open', (_e, cols, rows) => ptyPost('/dsh-gui/terminal/open', { cols, rows }));
-  ipcMain.on('panel:pty-input', (_e, data) => ptyPost('/dsh-gui/terminal/input', { data }));
-  ipcMain.on('panel:pty-resize', (_e, cols, rows) => ptyPost('/dsh-gui/terminal/resize', { cols, rows }));
-  ipcMain.on('panel:pty-close', () => {
-    /* the engine-side shared PTY stays alive for the agent */
+/** Stream one side-chat completion from the bridge and forward the chunks. */
+async function runSidechat(chatId, messages) {
+  if (!engineUrl) {
+    sendToPanels('panel:sidechat-chunk', chatId, '', true, '引擎还没就绪');
+    return;
+  }
+  try {
+    const res = await fetch(`${engineUrl}/dsh-gui/sidechat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages }),
+    });
+    if (!res.ok) {
+      let detail = `HTTP ${res.status}`;
+      try {
+        detail = (await res.json()).error ?? detail;
+      } catch { /* non-JSON error body */ }
+      sendToPanels('panel:sidechat-chunk', chatId, '', true, detail);
+      return;
+    }
+    const decoder = new TextDecoder();
+    for await (const part of res.body) {
+      sendToPanels('panel:sidechat-chunk', chatId, decoder.decode(part, { stream: true }), false);
+    }
+    sendToPanels('panel:sidechat-chunk', chatId, '', true);
+  } catch (err) {
+    sendToPanels('panel:sidechat-chunk', chatId, '', true, err.message);
+  }
+}
+
+/** Pop the panel out into its own window; the docked view collapses meanwhile. */
+function popOutPanel() {
+  if (popupWin && !popupWin.isDestroyed()) {
+    popupWin.focus();
+    return;
+  }
+  popupWin = new BrowserWindow({
+    width: 460,
+    height: 820,
+    minWidth: 340,
+    minHeight: 480,
+    title: 'Dsh GUI 面板',
+    backgroundColor: '#151517',
+    webPreferences: {
+      preload: join(__dirname, 'panel', 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
   });
+  popupWin.loadFile(join(__dirname, 'panel', 'panel.html'));
+  popupWin.webContents.on('did-finish-load', () => {
+    if (lastBridgeState) popupWin.webContents.send('panel:state', lastBridgeState);
+  });
+  popupWin.on('closed', () => {
+    popupWin = null;
+    if (!panelVisible) togglePanel();
+  });
+  if (panelVisible) togglePanel();
+}
+
+function wirePanelIpc() {
+  ipcMain.on('panel:pty-open', (_e, id, cols, rows) => ptyPost('/dsh-gui/terminal/open', { id, cols, rows }));
+  ipcMain.on('panel:pty-input', (_e, id, data) => ptyPost('/dsh-gui/terminal/input', { id, data }));
+  ipcMain.on('panel:pty-resize', (_e, id, cols, rows) => ptyPost('/dsh-gui/terminal/resize', { id, cols, rows }));
+  ipcMain.on('panel:pty-close', (_e, id) => {
+    // The engine keeps the shared agent PTY; only local tab PTYs are killed.
+    ptyPost('/dsh-gui/terminal/close', { id });
+    termSeqs.delete(id);
+  });
+  ipcMain.on('panel:terminals', (_e, ids) => {
+    if (process.env.DSH_GUI_DEBUG) console.log(`[pty-debug] terminals=${JSON.stringify(ids)}`);
+    if (Array.isArray(ids)) openTerminalIds = ids.filter((v) => typeof v === 'string');
+  });
+  ipcMain.on('panel:sidechat-send', (_e, chatId, messages) => {
+    if (typeof chatId === 'string' && Array.isArray(messages)) runSidechat(chatId, messages);
+  });
+  ipcMain.on('panel:popout', () => popOutPanel());
   ipcMain.on('panel:tab', (_e, tab) => {
     activeTab = tab;
   });
   ipcMain.on('panel:collapse', () => togglePanel());
 }
 
-/** DSH home: an isolated per-user harness home by default; override with DSH_GUI_HOME. */
+/**
+ * DSH home resolution, in priority order:
+ *  1. DSH_GUI_HOME env override;
+ *  2. the user's existing ~/.dsh — sessions/models/plugins stay in sync with
+ *     a locally run `dsh web` instead of forking into a second universe;
+ *  3. an app-owned home for machines that never used the dsh CLI.
+ */
 function resolveDshHome() {
   if (process.env.DSH_GUI_HOME && process.env.DSH_GUI_HOME.trim() !== '') {
     return process.env.DSH_GUI_HOME;
   }
+  const cliHome = join(app.getPath('home'), '.dsh');
+  if (existsSync(cliHome)) return cliHome;
   return join(app.getPath('appData'), APP_NAME, 'dsh-home');
 }
 
@@ -481,7 +578,7 @@ function createWindow() {
     height: 900,
     minWidth: 980,
     minHeight: 620,
-    backgroundColor: '#0b0d12',
+    backgroundColor: '#151517',
     title: APP_NAME,
     show: false,
   });
@@ -530,7 +627,7 @@ function createWindow() {
   mainView.webContents.loadURL(
     'data:text/html;charset=utf-8,' +
       encodeURIComponent(
-        `<!doctype html><html><body style="margin:0;background:#0b0d12;display:flex;align-items:center;justify-content:center;height:100vh;font-family:-apple-system,sans-serif;color:#8b93a7">
+        `<!doctype html><html><body style="margin:0;background:#151517;display:flex;align-items:center;justify-content:center;height:100vh;font-family:-apple-system,sans-serif;color:#8b93a7">
         <div style="text-align:center"><div style="font-size:34px;font-weight:700;color:#e8ecf4">Dsh GUI</div>
         <div style="margin-top:10px;font-size:14px">Starting the DeepSeek Harness engine…</div></div></body></html>`,
       ),
@@ -544,10 +641,13 @@ function createWindow() {
         console.warn('[dsh-gui] skin injection failed:', err.message);
       }
     }
-    if (SMOKE) {
-      // End-to-end probe: switch the panel to the terminal tab, type a
-      // command through the real IPC/PTY path, and read the rendered output
-      // back from xterm's DOM to prove the whole terminal chain works.
+    // The splash (data: URL) also fires did-finish-load — the probe must only
+    // run once the real engine page is up, or its typed input hits a dropped
+    // engineUrl and the terminal read comes back empty.
+    if (SMOKE && mainView.webContents.getURL().startsWith('http')) {
+      // End-to-end probe: open the panel's terminal tab, type a command
+      // through the real IPC/PTY path, and read the buffer back to prove the
+      // whole terminal chain works.
       const probe = async () => {
         const finish = (result) => {
           console.log(JSON.stringify(result));
@@ -559,29 +659,19 @@ function createWindow() {
             finish({ smoke: 'ok', url: mainView.webContents.getURL(), title: win.getTitle(), panel: 'missing' });
             return;
           }
-          await panelView.webContents.executeJavaScript(`switchTab('terminal')`);
+          await panelView.webContents.executeJavaScript(`__panelProbe.open('terminal')`);
           setTimeout(() => {
-            ipcMain.emit('panel:pty-input', null, 'echo PANEL_PTY_OK\r');
+            ipcMain.emit('panel:pty-input', null, 'agent', 'echo PANEL_PTY_OK\r');
             setTimeout(async () => {
               try {
                 const text = await panelView.webContents.executeJavaScript(
-                  `(() => {
-                    const dom = document.querySelector('.xterm-rows') ? document.querySelector('.xterm-rows').textContent : 'NO_XTERM';
-                    let buf = 'NO_TERM';
-                    try {
-                      const b = term.buffer.active;
-                      const lines = [];
-                      for (let i = 0; i < Math.min(b.length, 12); i++) lines.push(b.getLine(i).translateToString(true));
-                      buf = lines.join('\\n');
-                    } catch (e) { buf = 'ERR:' + e.message; }
-                    return dom + '|BUF|' + buf;
-                  })()`,
+                  `__panelProbe.agentTermText()`,
                 );
-                // switch to the browser tab and verify the shot IPC loop
-                await panelView.webContents.executeJavaScript(`switchTab('web')`);
+                // open the browser tab and verify the shot IPC loop
+                await panelView.webContents.executeJavaScript(`__panelProbe.open('web')`);
                 await new Promise((r) => setTimeout(r, 2200));
                 const browserState = await panelView.webContents.executeJavaScript(
-                  `({ emptyVisible: document.getElementById('browser-empty').style.display !== 'none', bar: document.getElementById('browser-bar').textContent })`,
+                  `__panelProbe.browserState()`,
                 );
                 // layout probe: the panel must take space from the window,
                 // never overlay the main view (Codex-style reallocation)

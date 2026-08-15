@@ -1,18 +1,18 @@
-/* Dsh GUI right panel — Codex-style visual system.
-   Same blue-tinted dark family as codex-skin.css so the panel reads as one
-   surface with the main view. */
+/* Dsh GUI right panel — Codex-style tabbed panel.
+   Palette lifted from the DSH web dark theme (neutral-bluish scale +
+   DeepSeek brand blue) so the panel reads as one surface with the main view. */
 
 :root {
-  --bg: #0b0d12;
-  --bg-2: #10131b;
-  --bg-3: #171b26;
-  --bg-hover: #1c2130;
-  --border: #1f2532;
-  --border-strong: #2a3245;
-  --text: #e6eaf2;
-  --text-mid: #aab3c5;
-  --text-dim: #7c8598;
-  --accent: #5b7cff;
+  --bg: #151517;         /* dsw neutral-bluish-950 (bg-base dark) */
+  --bg-2: #1b1b1c;       /* neutral-bluish-900 */
+  --bg-3: #2c2c2e;       /* neutral-bluish-850 (hovercard) */
+  --bg-hover: #353638;   /* neutral-bluish-800 */
+  --border: rgba(255, 255, 255, 0.07);
+  --border-strong: rgba(255, 255, 255, 0.13);
+  --text: #ebeef2;       /* neutral-bluish-100 */
+  --text-mid: #adb2b8;   /* neutral-bluish-400 */
+  --text-dim: #81858c;   /* neutral-bluish-600 */
+  --accent: #4176e6;     /* DeepSeek brand blue */
   --green: #3fb950;
   --red: #f85149;
   --yellow: #d29922;
@@ -48,7 +48,7 @@ body {
 
 ::-webkit-scrollbar {
   width: 10px;
-  height: 10px;
+  height: 8px;
 }
 ::-webkit-scrollbar-thumb {
   background: rgba(140, 150, 175, 0.28);
@@ -65,66 +65,99 @@ body {
   background: rgba(91, 124, 255, 0.35);
 }
 
-/* ── header: segmented control ─────────────────────────────────────────── */
+/* ── header: browser-style tab strip ───────────────────────────────────── */
 
 .panel-header {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   padding: 8px 8px 8px 10px;
   background: var(--bg);
   border-bottom: 1px solid var(--border);
-  -webkit-app-region: no-drag;
 }
 
-.segmented {
-  flex: 1 1 auto;
+.tabstrip {
   display: flex;
-  gap: 2px;
-  padding: 2px;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  max-width: calc(100% - 110px);
 }
 
-.seg {
-  flex: 1;
+.tabstrip::-webkit-scrollbar {
+  display: none;
+}
+
+.tab {
+  flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  gap: 5px;
-  padding: 4px 0;
-  border: none;
-  border-radius: 6px;
+  gap: 6px;
+  max-width: 168px;
+  padding: 5px 8px 5px 10px;
+  border: 1px solid transparent;
+  border-radius: 9px;
   background: transparent;
   color: var(--text-dim);
   font: inherit;
   font-weight: 500;
   cursor: pointer;
-  transition: color 0.12s, background 0.12s;
+  transition: background 0.12s, color 0.12s;
 }
 
-.seg:hover {
+.tab:hover {
+  background: var(--bg-2);
   color: var(--text-mid);
 }
 
-.seg.active {
-  color: var(--text);
+.tab.active {
   background: var(--bg-3);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  border-color: var(--border);
+  color: var(--text);
 }
 
-.count {
-  min-width: 16px;
-  padding: 0 4px;
-  border-radius: 999px;
-  background: rgba(91, 124, 255, 0.18);
-  color: var(--accent);
+.tab-icon {
+  flex: 0 0 auto;
   font-size: 10px;
-  font-weight: 600;
-  line-height: 15px;
-  text-align: center;
+  opacity: 0.8;
+}
+
+.tab-label {
+  flex: 0 1 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tab-close {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--text-dim);
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+
+.tab:hover .tab-close,
+.tab.active .tab-close {
+  opacity: 1;
+}
+
+.tab-close:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.header-spacer {
+  flex: 1 1 auto;
 }
 
 .icon-btn {
@@ -132,10 +165,10 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 27px;
+  height: 27px;
   border: none;
-  border-radius: 6px;
+  border-radius: 7px;
   background: transparent;
   color: var(--text-dim);
   cursor: pointer;
@@ -146,17 +179,70 @@ body {
   background: var(--bg-3);
 }
 
+/* ── new-tab menu ──────────────────────────────────────────────────────── */
+
+.menu {
+  position: fixed;
+  z-index: 100;
+  min-width: 178px;
+  padding: 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: 11px;
+  background: var(--bg-2);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 9px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.menu-item:hover {
+  background: var(--bg-hover);
+}
+
+.menu-icon {
+  flex: 0 0 18px;
+  font-size: 11px;
+  color: var(--text-dim);
+  text-align: center;
+}
+
+.menu-kbd {
+  margin-left: auto;
+  color: var(--text-dim);
+  font-size: 11px;
+  letter-spacing: 1px;
+}
+
 /* ── panes ─────────────────────────────────────────────────────────────── */
+
+.panes {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+}
 
 .pane {
   display: none;
   flex: 1 1 auto;
+  min-width: 0;
   min-height: 0;
+  flex-direction: column;
 }
 
 .pane.active {
   display: flex;
-  flex-direction: column;
 }
 
 .scroll {
@@ -168,13 +254,13 @@ body {
 
 /* ── terminal ──────────────────────────────────────────────────────────── */
 
-#term {
+.term-host {
   flex: 1 1 auto;
   min-height: 0;
   padding: 8px 4px 4px 10px;
 }
 
-#term .xterm {
+.term-host .xterm {
   height: 100%;
 }
 
@@ -407,7 +493,7 @@ body {
   font-size: 11px;
 }
 
-/* ── web cards ─────────────────────────────────────────────────────────── */
+/* ── web pane ──────────────────────────────────────────────────────────── */
 
 .urlbar {
   flex: 0 0 auto;
@@ -515,6 +601,109 @@ body {
   color: var(--text-dim);
   font-size: 11px;
   word-break: break-all;
+}
+
+/* ── side chat ─────────────────────────────────────────────────────────── */
+
+.chat-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+}
+
+.chat-hero {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 55vh;
+  text-align: center;
+}
+
+.chat-hero-glyph {
+  font-size: 26px;
+  opacity: 0.8;
+}
+
+.chat-hero-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.chat-hero-sub {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.chat-msg {
+  max-width: 88%;
+  padding: 8px 12px;
+  border-radius: 12px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.chat-msg.user {
+  align-self: flex-end;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+}
+
+.chat-msg.assistant {
+  align-self: flex-start;
+  color: var(--text);
+  padding-left: 2px;
+}
+
+.chat-composer {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  margin: 8px 10px 12px;
+  padding: 9px 10px 9px 13px;
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
+  background: var(--bg-2);
+}
+
+.chat-input {
+  flex: 1 1 auto;
+  max-height: 120px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  resize: none;
+  outline: none;
+}
+
+.chat-input::placeholder {
+  color: var(--text-dim);
+}
+
+.chat-send {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.chat-send:hover {
+  filter: brightness(1.12);
 }
 
 /* ── empty states ──────────────────────────────────────────────────────── */
