@@ -12,7 +12,7 @@
  */
 
 import { spawn, spawnSync } from 'node:child_process'
-import { chmodSync, mkdirSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -26,7 +26,24 @@ const INSTALL_TIMEOUT_MS = 300_000
 // git+https urls. Anything else (flags, paths, shell metachars) is rejected.
 const SPEC_RE = /^(@?[a-z0-9][\w.-]*(\/[a-z0-9][\w.-]*)?(@[\w.^~<>=-]+)?|github:[\w.-]+\/[\w.-]+(#[\w./-]+)?|git\+https:\/\/[\w./@:-]+)$/i
 
+const MAX_BODY_BYTES = 1_000_000
 const selfRequire = createRequire(import.meta.url)
+
+/** Reject cross-origin callers (see dsh-gui-bridge for the rationale). */
+function sameOrigin(req) {
+  const origin = req.headers.origin || req.headers.referer
+  if (!origin) return true
+  try {
+    return new URL(origin).host === (req.headers.host || '')
+  } catch {
+    return false
+  }
+}
+
+const guard = (handler) => async (req, res) => {
+  if (!sameOrigin(req)) return sendJson(res, 403, { error: 'forbidden' })
+  return handler(req, res)
+}
 
 function sendJson(res, status, body) {
   res.statusCode = status
@@ -37,7 +54,16 @@ function sendJson(res, status, body) {
 function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = []
-    req.on('data', (c) => chunks.push(c))
+    let size = 0
+    req.on('data', (c) => {
+      size += c.length
+      if (size > MAX_BODY_BYTES) {
+        reject(new Error('request body too large'))
+        req.destroy()
+        return
+      }
+      chunks.push(c)
+    })
     req.on('end', () => {
       try {
         resolve(JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'))
@@ -203,9 +229,10 @@ export function apply(ctx) {
     if (!spawnSync('pnpm', ['--version']).error) return env
     const corepack = spawnSync('corepack', ['--version'])
     if (corepack.error) return null
-    const shimDir = join(tmpdir(), 'dsh-gui-market-pnpm-shim')
+    // mkdtemp (not a fixed shared path) avoids a symlink-preplacement TOCTOU on
+    // the world-shared tmp dir.
+    const shimDir = mkdtempSync(join(tmpdir(), 'dsh-gui-pnpm-'))
     const shim = join(shimDir, 'pnpm')
-    mkdirSync(shimDir, { recursive: true })
     writeFileSync(shim, '#!/bin/sh\nexec corepack pnpm "$@"\n')
     chmodSync(shim, 0o755)
     env.PATH = `${shimDir}:${env.PATH ?? ''}`
@@ -251,19 +278,19 @@ export function apply(ctx) {
   ctx.webServer.register({
     kind: 'exact',
     path: '/api/market/installed',
-    handler: (_req, res) => {
+    handler: guard((_req, res) => {
       try {
         sendJson(res, 200, { plugins: listInstalled() })
       } catch (err) {
         sendJson(res, 500, { error: err.message })
       }
-    },
+    }),
   })
 
   ctx.webServer.register({
     kind: 'exact',
     path: '/api/market/search',
-    handler: async (req, res) => {
+    handler: guard(async (req, res) => {
       const params = new URL(req.url, 'http://x').searchParams
       const source = params.get('source') === 'github' ? 'github' : 'npm'
       const strict = params.get('strict') !== '0'
@@ -275,13 +302,13 @@ export function apply(ctx) {
       } catch (err) {
         sendJson(res, 502, { error: `搜索失败: ${err.message}` })
       }
-    },
+    }),
   })
 
   ctx.webServer.register({
     kind: 'exact',
     path: '/api/market/install',
-    handler: async (req, res) => {
+    handler: guard(async (req, res) => {
       let body
       try {
         body = await readBody(req)
@@ -302,9 +329,13 @@ export function apply(ctx) {
       try {
         const result = await runInstall(spec)
         sendJson(res, result.ok ? 200 : 500, result)
+      } catch (err) {
+        // runInstall is resolve-typed, but resolve()/spawn setup can still
+        // throw — never leave the client's request hanging.
+        sendJson(res, 500, { ok: false, output: `安装启动失败: ${err.message}` })
       } finally {
         installing = false
       }
-    },
+    }),
   })
 }

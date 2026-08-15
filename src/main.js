@@ -286,17 +286,26 @@ async function pollBridgeState() {
   }
 }
 
+// chatId → AbortController for the in-flight side-chat stream; aborting the
+// fetch drops the HTTP connection, which the bridge observes (req 'close') and
+// cancels the model call — so closing a chat tab stops billing.
+const sidechatAborts = new Map();
+
 /** Stream one side-chat completion from the bridge and forward the chunks. */
 async function runSidechat(chatId, messages) {
   if (!engineUrl) {
     sendToPanels('panel:sidechat-chunk', chatId, '', true, '引擎还没就绪');
     return;
   }
+  sidechatAborts.get(chatId)?.abort(); // supersede any prior stream for this chat
+  const abort = new AbortController();
+  sidechatAborts.set(chatId, abort);
   try {
     const res = await fetch(`${engineUrl}/dsh-gui/sidechat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ messages }),
+      signal: abort.signal,
     });
     if (!res.ok) {
       let detail = `HTTP ${res.status}`;
@@ -312,7 +321,10 @@ async function runSidechat(chatId, messages) {
     }
     sendToPanels('panel:sidechat-chunk', chatId, '', true);
   } catch (err) {
+    if (err.name === 'AbortError') return; // tab closed — no error to surface
     sendToPanels('panel:sidechat-chunk', chatId, '', true, err.message);
+  } finally {
+    if (sidechatAborts.get(chatId) === abort) sidechatAborts.delete(chatId);
   }
 }
 
@@ -362,6 +374,9 @@ function wirePanelIpc() {
   });
   ipcMain.on('panel:sidechat-send', (_e, chatId, messages) => {
     if (typeof chatId === 'string' && Array.isArray(messages)) runSidechat(chatId, messages);
+  });
+  ipcMain.on('panel:sidechat-abort', (_e, chatId) => {
+    sidechatAborts.get(chatId)?.abort();
   });
   ipcMain.on('panel:popout', () => popOutPanel());
   ipcMain.on('panel:tab', (_e, tab) => {

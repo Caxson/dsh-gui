@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld('dshPanel', {
 
   // ── side chat (ephemeral, streamed) ─────────────────────────────────────
   sidechatSend: (chatId, messages) => ipcRenderer.send('panel:sidechat-send', chatId, messages),
+  sidechatAbort: (chatId) => ipcRenderer.send('panel:sidechat-abort', chatId),
   onSidechatChunk: (cb) =>
     ipcRenderer.on('panel:sidechat-chunk', (_e, chatId, text, done, error) => cb(chatId, text, done, error)),
 

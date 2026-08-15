@@ -10,9 +10,9 @@
  *   POST /dsh-gui/import/summarize {path,source}  → { summary }
  */
 
-import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs'
+import { readFileSync, readdirSync, statSync, existsSync, realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join, resolve, sep } from 'node:path'
+import { join, sep } from 'node:path'
 import { BlockAssembler, createUserMessage, deepFreeze } from '@deepseek-ai/dsh-llm'
 import { deadline } from '@deepseek-ai/dsh-timeout'
 
@@ -38,7 +38,16 @@ function sendJson(res, status, body) {
 function readBody(req) {
   return new Promise((resolvePromise, reject) => {
     const chunks = []
-    req.on('data', (c) => chunks.push(c))
+    let size = 0
+    req.on('data', (c) => {
+      size += c.length
+      if (size > 100_000) {
+        reject(new Error('request body too large'))
+        req.destroy()
+        return
+      }
+      chunks.push(c)
+    })
     req.on('end', () => {
       try {
         resolvePromise(JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'))
@@ -268,10 +277,43 @@ const SUMMARIZE_SYSTEM = [
   '用中文，条目化，克制篇幅但不丢关键事实。不要编造记录里没有的内容。',
 ].join('\n')
 
-/** Guard: only files inside the three known transcript roots are readable. */
+/**
+ * Guard: only files inside the three known transcript roots are readable.
+ * realpath (not resolve) so a symlink planted inside a root can't point the
+ * read outside it.
+ */
 function isAllowedPath(path) {
-  const full = resolve(path)
-  return Object.values(SOURCE_ROOTS).some((root) => full.startsWith(root + sep))
+  let full
+  try {
+    full = realpathSync(path)
+  } catch {
+    return false
+  }
+  return Object.values(SOURCE_ROOTS).some((root) => {
+    let realRoot
+    try {
+      realRoot = realpathSync(root)
+    } catch {
+      return false
+    }
+    return full === realRoot || full.startsWith(realRoot + sep)
+  })
+}
+
+/** Reject cross-origin callers (see dsh-gui-bridge for the rationale). */
+function sameOrigin(req) {
+  const origin = req.headers.origin || req.headers.referer
+  if (!origin) return true
+  try {
+    return new URL(origin).host === (req.headers.host || '')
+  } catch {
+    return false
+  }
+}
+
+const guard = (handler) => async (req, res) => {
+  if (!sameOrigin(req)) return sendJson(res, 403, { error: 'forbidden' })
+  return handler(req, res)
 }
 
 export function apply(ctx) {
@@ -322,18 +364,18 @@ export function apply(ctx) {
         httpCtx.webServer.register({
           kind: 'exact',
           path: '/dsh-gui/import/sessions',
-          handler: async (_req, res) => {
+          handler: guard((_req, res) => {
             try {
               sendJson(res, 200, { sessions: listAllSessions() })
             } catch (err) {
               sendJson(res, 500, { error: err.message })
             }
-          },
+          }),
         }),
         httpCtx.webServer.register({
           kind: 'exact',
           path: '/dsh-gui/import/summarize',
-          handler: async (req, res) => {
+          handler: guard(async (req, res) => {
             let body
             try {
               body = await readBody(req)
@@ -354,7 +396,7 @@ export function apply(ctx) {
             } catch (err) {
               sendJson(res, 500, { error: err.message })
             }
-          },
+          }),
         }),
       ]
       return () => disposers.forEach((d) => d())

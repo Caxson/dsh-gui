@@ -336,7 +336,11 @@
     return {
       type: 'sidechat', chatId, el: root,
       onShow() { input.focus(); },
-      onResize() {}, dispose() {},
+      onResize() {},
+      dispose() {
+        // Closing the tab mid-stream must stop the model call (and its billing).
+        if (streaming !== null) window.dshPanel.sidechatAbort(chatId);
+      },
       onChunk(text, done, error) {
         if (streaming === null) return;
         if (streaming.textContent === '…') streaming.textContent = '';

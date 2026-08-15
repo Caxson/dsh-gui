@@ -29,12 +29,40 @@ const DEFAULT_SHELL = process.env.SHELL || "/bin/zsh";
 const AGENT_PTY = "agent";
 const PTY_ID_RE = /^[a-z0-9][a-z0-9-]{0,32}$/;
 const SIDECHAT_MAX_TOKENS = 4096;
+const MAX_BODY_BYTES = 1_000_000;
+const CALLS_MAX = 400;
 
-/** Read a JSON request body. */
+/**
+ * Reject cross-origin requests to these loopback routes. A same-origin fetch
+ * from the DSH web page carries Origin=own host; the native (main-process)
+ * fetch carries no Origin at all. A foreign page's POST always carries a
+ * foreign Origin — that is the blind-POST attack we block. Missing Origin is
+ * allowed (trusted native caller); present-and-mismatched is rejected.
+ */
+function sameOrigin(req) {
+  const origin = req.headers.origin || req.headers.referer;
+  if (!origin) return true;
+  try {
+    return new URL(origin).host === (req.headers.host || "");
+  } catch {
+    return false;
+  }
+}
+
+/** Read a JSON request body, capped to guard against memory-DoS. */
 function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
-    req.on("data", (c) => chunks.push(c));
+    let size = 0;
+    req.on("data", (c) => {
+      size += c.length;
+      if (size > MAX_BODY_BYTES) {
+        reject(new Error("request body too large"));
+        req.destroy();
+        return;
+      }
+      chunks.push(c);
+    });
     req.on("end", () => {
       try {
         resolve(JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}"));
@@ -59,7 +87,6 @@ export function apply(ctx) {
   // ── PTY sessions (agent-shared + local tabs) ────────────────────────────
   /** id → { proc, outSeq, outLog: {seq, data}[] } */
   const ptys = new Map();
-  let activeCollector = null; // one in-flight terminal_send output sink
 
   function ensurePty(id, spawnCwd, cols, rows) {
     const existing = ptys.get(id);
@@ -81,7 +108,6 @@ export function apply(ctx) {
     const entry = { proc, outSeq: 0, outLog: [] };
     const pushOut = (data) => {
       entry.outLog.push({ seq: entry.outSeq++, data });
-      if (id === AGENT_PTY && activeCollector) activeCollector(data);
       if (entry.outLog.length > PTY_OUT_MAX) entry.outLog.shift();
     };
     proc.onData(pushOut);
@@ -150,7 +176,12 @@ export function apply(ctx) {
       } else if (name === "web_fetch") {
         activity = { kind: "web", type: "fetch", url: args.url ?? "" };
       }
-      if (activity) calls.set(data.callId, push(activity));
+      if (activity) {
+        calls.set(data.callId, push(activity));
+        // Bound the pairing map: unmatched calls (interrupted turns, errors
+        // with no tool/result) would otherwise leak. Drop the oldest.
+        if (calls.size > CALLS_MAX) calls.delete(calls.keys().next().value);
+      }
     } else if (event.type === "tool/result") {
       const callId = data.callId ?? data.message?.callId;
       const activity = calls.get(callId);
@@ -188,35 +219,39 @@ export function apply(ctx) {
       },
       render: (_args, value) => [{ type: "text", text: value.content }],
     },
-    isConcurrencySafe: () => true,
+    // Not concurrency-safe: it writes raw keystrokes into one shared PTY, so
+    // the engine must serialize calls (two concurrent commands would interleave
+    // in the same line). Output is read back by seq range, not a shared sink.
     async execute(args, exec) {
       const sessionCwd = exec?.agent?.session?.header?.cwd;
       const entry = ensurePty(AGENT_PTY, sessionCwd);
       if (!entry) return { content: "[terminal unavailable]" };
       const started = Date.now();
       const timeout = args.timeoutMs ?? 60000;
-      let buf = "";
+      // Read this command's output from the ring buffer by seq, so it never
+      // depends on a shared collector another call could clobber.
+      const fromSeq = entry.outSeq;
+      const collect = () =>
+        entry.outLog.filter((c) => c.seq >= fromSeq).map((c) => c.data).join("");
+      let lastLen = 0;
       let last = Date.now();
-      activeCollector = (data) => {
-        buf += data;
-        last = Date.now();
-      };
-      try {
-        entry.proc.write(`${args.command}\r`);
-        await new Promise((resolve) => {
-          const timer = setInterval(() => {
-            const now = Date.now();
-            const quiet = buf.length > 0 && now - last > 700;
-            if (quiet || now - started > timeout) {
-              clearInterval(timer);
-              resolve();
-            }
-          }, 100);
-        });
-      } finally {
-        activeCollector = null;
-      }
-      return { content: buf };
+      entry.proc.write(`${args.command}\r`);
+      await new Promise((resolve) => {
+        const timer = setInterval(() => {
+          const len = collect().length;
+          if (len !== lastLen) {
+            lastLen = len;
+            last = Date.now();
+          }
+          const now = Date.now();
+          const quiet = len > 0 && now - last > 700;
+          if (quiet || now - started > timeout) {
+            clearInterval(timer);
+            resolve();
+          }
+        }, 100);
+      });
+      return { content: collect() };
     },
   }));
 
@@ -297,16 +332,21 @@ export function apply(ctx) {
         const id = typeof raw === "string" && raw !== "" ? raw : AGENT_PTY;
         return PTY_ID_RE.test(id) ? id : null;
       };
+      // Reject cross-origin callers before any side effect / data read.
+      const guard = (handler) => async (req, res) => {
+        if (!sameOrigin(req)) return json(res, { error: "forbidden" }, 403);
+        return handler(req, res);
+      };
       const disposers = [
         httpCtx.webServer.register({
           kind: "exact",
           path: "/dsh-gui/state",
-          handler: async (_req, res) => json(res, { cwd, home: homedir(), activities }),
+          handler: guard(async (_req, res) => json(res, { cwd, home: homedir(), activities })),
         }),
         httpCtx.webServer.register({
           kind: "exact",
           path: "/dsh-gui/terminal/open",
-          handler: async (req, res) => {
+          handler: guard(async (req, res) => {
             const body = await readBody(req).catch(() => ({}));
             const id = ptyIdOf(body.id);
             if (id === null) return json(res, { ok: false, error: "bad id" }, 400);
@@ -318,23 +358,23 @@ export function apply(ctx) {
               } catch { /* ignore */ }
             }
             json(res, { ok: true, seq: entry.outSeq });
-          },
+          }),
         }),
         httpCtx.webServer.register({
           kind: "exact",
           path: "/dsh-gui/terminal/input",
-          handler: async (req, res) => {
+          handler: guard(async (req, res) => {
             const body = await readBody(req).catch(() => ({}));
             const id = ptyIdOf(body.id);
             const entry = id === null ? undefined : ptys.get(id);
             if (entry && typeof body.data === "string") entry.proc.write(body.data);
             json(res, { ok: true });
-          },
+          }),
         }),
         httpCtx.webServer.register({
           kind: "exact",
           path: "/dsh-gui/terminal/resize",
-          handler: async (req, res) => {
+          handler: guard(async (req, res) => {
             const body = await readBody(req).catch(() => ({}));
             const id = ptyIdOf(body.id);
             const entry = id === null ? undefined : ptys.get(id);
@@ -344,23 +384,23 @@ export function apply(ctx) {
               } catch { /* ignore */ }
             }
             json(res, { ok: true });
-          },
+          }),
         }),
         httpCtx.webServer.register({
           kind: "exact",
           path: "/dsh-gui/terminal/close",
-          handler: async (req, res) => {
+          handler: guard(async (req, res) => {
             const body = await readBody(req).catch(() => ({}));
             const id = ptyIdOf(body.id);
             // The agent terminal outlives its tab: the model may still use it.
             if (id !== null && id !== AGENT_PTY) closePty(id);
             json(res, { ok: true });
-          },
+          }),
         }),
         httpCtx.webServer.register({
           kind: "exact",
           path: "/dsh-gui/terminal/out",
-          handler: async (req, res) => {
+          handler: guard(async (req, res) => {
             const params = new URL(req.url, "http://x").searchParams;
             const id = ptyIdOf(params.get("id") ?? undefined);
             const since = Number(params.get("since") ?? -1);
@@ -368,12 +408,12 @@ export function apply(ctx) {
             if (!entry) return json(res, { seq: 0, chunks: [] });
             const chunks = entry.outLog.filter((c) => c.seq > since).map((c) => c.data);
             json(res, { seq: entry.outSeq, chunks });
-          },
+          }),
         }),
         httpCtx.webServer.register({
           kind: "exact",
           path: "/dsh-gui/sidechat",
-          handler: handleSidechat,
+          handler: guard(handleSidechat),
         }),
       ];
       return () => disposers.forEach((d) => d());

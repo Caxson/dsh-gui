@@ -99,6 +99,12 @@ window.__ModuleLoader__.load({
       link: { color: 'inherit', opacity: 0.6, fontSize: 11, textDecoration: 'underline' },
     }
 
+    // Package/registry metadata is publisher-controlled; only render http(s)
+    // URLs as clickable links (blocks javascript:/data: hrefs).
+    function safeUrl(u) {
+      return typeof u === 'string' && /^https?:\/\//i.test(u) ? u : null
+    }
+
     function InstalledCard(props) {
       var p = props.plugin
       var t = props.t
@@ -113,8 +119,8 @@ window.__ModuleLoader__.load({
         h('div', { style: S.cardHead },
           h('span', { style: S.name }, p.moduleName),
           chips,
-          p.repository
-            ? h('a', { style: S.link, href: p.repository, target: '_blank', rel: 'noreferrer' }, 'repo')
+          safeUrl(p.repository)
+            ? h('a', { style: S.link, href: safeUrl(p.repository), target: '_blank', rel: 'noreferrer' }, 'repo')
             : null
         ),
         h('p', { style: S.desc }, p.description || t('noDescription')),
@@ -139,7 +145,7 @@ window.__ModuleLoader__.load({
         h('div', { style: S.cardHead },
           h('span', { style: S.name }, r.name),
           meta.length ? h('span', { style: S.dim }, meta.join(' · ')) : null,
-          r.url ? h('a', { style: S.link, href: r.url, target: '_blank', rel: 'noreferrer' }, r.source) : null,
+          safeUrl(r.url) ? h('a', { style: S.link, href: safeUrl(r.url), target: '_blank', rel: 'noreferrer' }, r.source) : null,
           h('button', {
             style: Object.assign({}, S.btn, { marginLeft: 'auto' }),
             disabled: busy,
