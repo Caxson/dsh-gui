@@ -683,15 +683,24 @@ function createWindow() {
           }
           await panelView.webContents.executeJavaScript(`__panelProbe.open('terminal')`);
           setTimeout(() => {
-            ipcMain.emit('panel:pty-input', null, 'agent', 'echo PANEL_PTY_OK\r');
-            // Poll the terminal buffer until the echo lands (CI runners are
-            // slower than a fixed wait) — up to ~8s, then read whatever's there.
             const readTerm = () => panelView.webContents.executeJavaScript(`__panelProbe.agentTermText()`);
+            const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+            // On a slow runner (GitHub's macOS shell is bash 3.2, slower to
+            // read its init files than local zsh), keystrokes sent before the
+            // shell is ready are lost. So: wait for a prompt, THEN type, THEN
+            // poll for the echo — resending if it doesn't land.
             const awaitEcho = async () => {
-              for (let i = 0; i < 40; i++) {
-                const t = await readTerm();
-                if (String(t).includes('PANEL_PTY_OK')) return t;
-                await new Promise((r) => setTimeout(r, 200));
+              for (let i = 0; i < 30; i++) {
+                if (/[$%#]\s*$/.test(String(await readTerm()))) break;
+                await sleep(200);
+              }
+              for (let attempt = 0; attempt < 5; attempt++) {
+                ipcMain.emit('panel:pty-input', null, 'agent', 'echo PANEL_PTY_OK\r');
+                for (let i = 0; i < 15; i++) {
+                  const t = await readTerm();
+                  if (String(t).includes('PANEL_PTY_OK')) return t;
+                  await sleep(200);
+                }
               }
               return readTerm();
             };

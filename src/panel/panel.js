@@ -243,7 +243,7 @@ window.__panelProbe = {
     try {
       const b = tab.pane.term.buffer.active;
       const lines = [];
-      for (let i = 0; i < Math.min(b.length, 12); i++) lines.push(b.getLine(i).translateToString(true));
+      for (let i = 0; i < Math.min(b.length, 60); i++) lines.push(b.getLine(i).translateToString(true));
       return lines.join('\n');
     } catch (e) {
       return 'ERR:' + e.message;
