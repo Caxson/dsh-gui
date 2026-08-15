@@ -169,6 +169,7 @@
     head.addEventListener('click', () => {
       const nowOpen = !card.classList.contains('open');
       card.classList.toggle('open', nowOpen);
+      if (userToggled.size > 800) userToggled.delete(userToggled.keys().next().value);
       userToggled.set(group.path, nowOpen);
     });
     card.appendChild(head);

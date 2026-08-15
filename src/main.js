@@ -352,14 +352,21 @@ function popOutPanel() {
   popupWin.webContents.on('did-finish-load', () => {
     if (lastBridgeState) popupWin.webContents.send('panel:state', lastBridgeState);
   });
+  // Remember whether the dock was visible before popping out, so closing the
+  // popup restores exactly that state (never un-collapses a panel the user
+  // had deliberately hidden).
+  const dockWasVisible = panelVisible;
   popupWin.on('closed', () => {
     popupWin = null;
-    if (!panelVisible) togglePanel();
+    if (dockWasVisible && !panelVisible) togglePanel();
   });
   if (panelVisible) togglePanel();
 }
 
+let panelIpcWired = false;
 function wirePanelIpc() {
+  if (panelIpcWired) return; // idempotent: window rebuild must not double-register
+  panelIpcWired = true;
   ipcMain.on('panel:pty-open', (_e, id, cols, rows) => ptyPost('/dsh-gui/terminal/open', { id, cols, rows }));
   ipcMain.on('panel:pty-input', (_e, id, data) => ptyPost('/dsh-gui/terminal/input', { id, data }));
   ipcMain.on('panel:pty-resize', (_e, id, cols, rows) => ptyPost('/dsh-gui/terminal/resize', { id, cols, rows }));
