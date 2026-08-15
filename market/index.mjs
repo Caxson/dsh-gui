@@ -158,10 +158,15 @@ function dedupe(rows) {
   })
 }
 
-/** dsh-ecosystem filter: keep rows that plausibly belong to the DSH world. */
+/**
+ * dsh-ecosystem filter. Name alone is not enough (npm's `dsh` is an unrelated
+ * JS shell), so require either a dsh- name prefix (scoped included) or an
+ * explicit DeepSeek/Harness mention in the metadata.
+ */
 function dshOnly(rows) {
-  const re = /\bdsh\b|dsh-|deepseek/i
-  return rows.filter((r) => re.test(`${r.name} ${r.description}`))
+  const namePrefix = /(^|\/)dsh[-_]/i
+  const mention = /deepseek|harness/i
+  return rows.filter((r) => namePrefix.test(r.name) || mention.test(`${r.name} ${r.description}`))
 }
 
 export function apply(ctx) {
