@@ -684,11 +684,20 @@ function createWindow() {
           await panelView.webContents.executeJavaScript(`__panelProbe.open('terminal')`);
           setTimeout(() => {
             ipcMain.emit('panel:pty-input', null, 'agent', 'echo PANEL_PTY_OK\r');
+            // Poll the terminal buffer until the echo lands (CI runners are
+            // slower than a fixed wait) — up to ~8s, then read whatever's there.
+            const readTerm = () => panelView.webContents.executeJavaScript(`__panelProbe.agentTermText()`);
+            const awaitEcho = async () => {
+              for (let i = 0; i < 40; i++) {
+                const t = await readTerm();
+                if (String(t).includes('PANEL_PTY_OK')) return t;
+                await new Promise((r) => setTimeout(r, 200));
+              }
+              return readTerm();
+            };
             setTimeout(async () => {
               try {
-                const text = await panelView.webContents.executeJavaScript(
-                  `__panelProbe.agentTermText()`,
-                );
+                const text = await awaitEcho();
                 // open the browser tab and verify the shot IPC loop
                 await panelView.webContents.executeJavaScript(`__panelProbe.open('web')`);
                 await new Promise((r) => setTimeout(r, 2200));
