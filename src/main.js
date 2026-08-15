@@ -303,6 +303,41 @@ function seedSettings(dshHome) {
 }
 
 /**
+ * Seed the 心流模式 (Flow Mode) agent preset: the engine's standard assembly
+ * plus the dsh-gui-flow triage row. Regenerated every boot so the copied
+ * standard manifest tracks engine upgrades; preset discovery is unmemoized,
+ * so the preset shows up in the new-session mode picker without a restart.
+ */
+function seedFlowPreset(dshHome) {
+  const standardManifest = join(
+    APP_ROOT, 'node_modules', '@deepseek-ai', 'dsh', 'config', 'agent-presets', 'standard', 'agent.cordis.yml',
+  );
+  if (!existsSync(standardManifest)) {
+    console.warn('[dsh-gui] standard preset manifest missing; flow preset not seeded');
+    return;
+  }
+  const presetDir = join(dshHome, '.agent-presets', 'flow');
+  try {
+    mkdirSync(presetDir, { recursive: true });
+    writeFileSync(
+      join(presetDir, 'preset.yml'),
+      'name: 心流模式\n' +
+        'description: 边跑边聊 —— 运行中排队的消息由轻量裁判模型分诊，相关的即时并入上下文，独立请求留作新轮次\n' +
+        'order: 50\n',
+    );
+    writeFileSync(
+      join(presetDir, 'agent.cordis.yml'),
+      readFileSync(standardManifest, 'utf8') +
+        '\n# ── dsh-gui flow mode: pre-step triage of queued user messages ──────────\n' +
+        '- id: flow-triage\n' +
+        "  name: 'dsh-gui-flow'\n",
+    );
+  } catch (err) {
+    console.warn('[dsh-gui] could not seed flow preset:', err.message);
+  }
+}
+
+/**
  * Make the dsh-gui-bridge package resolvable by the engine's loader.
  * The engine symlinks only dsh's own dependency closure into
  * <dsh-home>/profiles/node_modules; our bridge is an app-level package, so we
@@ -310,7 +345,7 @@ function seedSettings(dshHome) {
  */
 function linkBridgeModules(dshHome) {
   const modulesDir = join(dshHome, 'profiles', 'node_modules');
-  for (const pkg of ['dsh-gui-bridge', 'dsh-gui-browser', 'dsh-gui-market']) {
+  for (const pkg of ['dsh-gui-bridge', 'dsh-gui-browser', 'dsh-gui-market', 'dsh-gui-flow']) {
     const linkPath = join(modulesDir, pkg);
     const target = join(APP_ROOT, 'node_modules', pkg);
     if (!existsSync(target) || existsSync(linkPath)) continue;
@@ -626,6 +661,7 @@ if (!gotLock) {
 
     const dshHome = resolveDshHome();
     seedSettings(dshHome);
+    seedFlowPreset(dshHome);
     linkBridgeModules(dshHome);
     console.log(`[dsh-gui] DSH_HOME=${dshHome}`);
 

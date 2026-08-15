@@ -1,0 +1,15 @@
+{
+  "name": "dsh-gui-flow",
+  "version": "0.1.0",
+  "description": "Dsh GUI 心流模式 — agent 运行中排队的用户消息,在每次调模型前由轻量裁判模型分诊,相关的无缝并入当前上下文,独立的留队列成新轮次",
+  "license": "MIT",
+  "type": "module",
+  "main": "./index.mjs",
+  "exports": {
+    ".": "./index.mjs",
+    "./package.json": "./package.json"
+  },
+  "peerDependencies": {
+    "cordis": "^4.0.0-rc.7"
+  }
+}
