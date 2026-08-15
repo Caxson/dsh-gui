@@ -141,6 +141,39 @@ function headerMeta(path) {
   }
 }
 
+/**
+ * Detect the real working directory of a transcript: the first `cwd`-named
+ * absolute path found in the early records that still exists on disk. Used to
+ * anchor the continuation session in the same workspace.
+ */
+function detectCwd(path) {
+  let raw
+  try {
+    raw = readFileSync(path, 'utf8')
+  } catch {
+    return ''
+  }
+  const findCwd = (node, depthLeft = 4) => {
+    if (node === null || typeof node !== 'object' || depthLeft < 0) return ''
+    if (typeof node.cwd === 'string' && node.cwd.startsWith('/')) return node.cwd
+    for (const value of Object.values(node)) {
+      const found = findCwd(value, depthLeft - 1)
+      if (found !== '') return found
+    }
+    return ''
+  }
+  for (const line of raw.split('\n', 40)) {
+    if (line.trim() === '') continue
+    try {
+      const cwd = findCwd(JSON.parse(line))
+      if (cwd !== '' && existsSync(cwd)) return cwd
+    } catch {
+      /* not JSON */
+    }
+  }
+  return ''
+}
+
 function listClaudeSessions() {
   const root = SOURCE_ROOTS.claude
   if (!existsSync(root)) return []
@@ -317,7 +350,7 @@ export function apply(ctx) {
             req.on('close', () => abort.abort())
             try {
               const summary = await summarize(path, abort.signal)
-              sendJson(res, 200, { summary })
+              sendJson(res, 200, { summary, cwd: detectCwd(path) })
             } catch (err) {
               sendJson(res, 500, { error: err.message })
             }
