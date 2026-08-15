@@ -23,12 +23,26 @@ injected through DSH's own plugin/patch system.
 
 ## 安装 / Install
 
-从 [Releases](https://github.com/Caxson/dsh-gui/releases) 下载最新 `Dsh GUI-<版本>-arm64.dmg`，拖入 Applications。
+> 目前仅提供 Apple Silicon (arm64) 版本。Currently Apple Silicon (arm64) only.
 
-> 未签名版本首次打开若提示「已损坏/无法验证开发者」：
-> `xattr -cr "/Applications/Dsh GUI.app"` 后重新打开。
+1. 从 [Releases](https://github.com/Caxson/dsh-gui/releases) 下载最新 `Dsh.GUI-<版本>-arm64.dmg`
+2. 双击打开，把 **Dsh GUI** 拖进「应用程序」
+3. **首次打开前**在终端执行一次（见下方说明）：
 
-打开后进入 **设置 → Models** 填入 DeepSeek（或任意 OpenAI 兼容）API Key 即可。
+   ```bash
+   xattr -cr "/Applications/Dsh GUI.app"
+   ```
+
+4. 打开后进入 **设置 → 模型** 填入 DeepSeek（或任意 OpenAI 兼容）API Key，开聊
+
+### 为什么会提示「已损坏，无法打开」？
+
+这不是文件真的损坏。本项目未购买 Apple 开发者证书（$99/年），macOS Gatekeeper
+会拦截所有从网络下载的未签名应用，并把它们统一报成「已损坏」。上面的 `xattr`
+命令只是移除下载时附加的隔离标记，App 本身开源可审计，构建产物由
+GitHub Releases 直出。First launch of an unsigned app is blocked by Gatekeeper
+with a misleading "damaged" alert — the one-time `xattr -cr` above clears the
+quarantine flag; the app is open source and built straight from this repo.
 数据在 `~/Library/Application Support/Dsh GUI/dsh-home`，独立于你已有的 `~/.dsh`；
 想复用现有 home：`DSH_GUI_HOME="$HOME/.dsh" open "/Applications/Dsh GUI.app"`。
 
