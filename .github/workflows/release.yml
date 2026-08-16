@@ -78,7 +78,22 @@ jobs:
           # the whole credential set is present, and say which way it went.
           if [ -n "$CSC_LINK" ] && [ -n "$APPLE_ID" ] && [ -n "$APPLE_APP_SPECIFIC_PASSWORD" ] && [ -n "$APPLE_TEAM_ID" ]; then
             echo "building signed + notarized ($ARCH)"
-            npx electron-builder --mac --$ARCH --publish never
+            # Notarization uploads a ~450MB archive to Apple, and that transfer
+            # times out often enough to fail an otherwise good release. Retry
+            # the build rather than leaving a tagged version unpublished; a
+            # genuine signing or notarization rejection fails all three times.
+            for attempt in 1 2 3; do
+              if npx electron-builder --mac --$ARCH --publish never; then
+                echo "build succeeded on attempt $attempt"
+                break
+              fi
+              if [ "$attempt" = 3 ]; then
+                echo "notarized build failed three times — not a transient upload problem"
+                exit 1
+              fi
+              echo "attempt $attempt failed; retrying in 60s"
+              sleep 60
+            done
           else
             echo "building UNSIGNED ($ARCH) — signing/notarization secrets incomplete"
             CSC_IDENTITY_AUTO_DISCOVERY=false npx electron-builder --mac --$ARCH -c.mac.notarize=false --publish never
@@ -158,6 +173,9 @@ jobs:
           OSS_KEY_ID: ${{ secrets.OSS_KEY_ID }}
           OSS_KEY_SECRET: ${{ secrets.OSS_KEY_SECRET }}
           OSS_ENDPOINT: oss-cn-hangzhou.aliyuncs.com
+          # ossutil v2 signs with SigV4, which requires an explicit region —
+          # there is no ~/.ossutilconfig on a runner to infer it from.
+          OSS_REGION: cn-hangzhou
           # Artifacts live under a prefix of the shared static bucket; the
           # download page has its own bucket, whose root is the site served at
           # the public domain. They are deliberately not the same bucket — the
@@ -173,6 +191,7 @@ jobs:
           put() {
             ossutil-bin/ossutil cp -f "$1" "$2" \
               --endpoint "$OSS_ENDPOINT" \
+              --region "$OSS_REGION" \
               --access-key-id "$OSS_KEY_ID" \
               --access-key-secret "$OSS_KEY_SECRET"
           }
@@ -184,5 +203,6 @@ jobs:
           # Download page (page + its assets) at the site bucket's root.
           ossutil-bin/ossutil cp -f -r dist-site/ "oss://$OSS_SITE_BUCKET/" \
             --endpoint "$OSS_ENDPOINT" \
+            --region "$OSS_REGION" \
             --access-key-id "$OSS_KEY_ID" \
             --access-key-secret "$OSS_KEY_SECRET"
