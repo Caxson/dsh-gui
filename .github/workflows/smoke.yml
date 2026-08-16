@@ -18,6 +18,12 @@ jobs:
           node-version: 22
           cache: npm
 
+      - name: Verify engine dependency closure
+        # Reads only the committed lockfile — catches an incoherent engine bump
+        # (a split runtime family, or a newly-added first-party package we never
+        # picked up) before we spend time installing or booting anything.
+        run: npm run verify:closure
+
       - name: Install dependencies
         run: npm ci
 
