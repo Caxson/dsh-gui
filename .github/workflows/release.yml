@@ -28,9 +28,12 @@ jobs:
           node-version: 22
           cache: npm
 
-      - name: Verify engine dependency closure
-        # No release ships on an incoherent runtime family — fail before build.
-        run: npm run verify:closure
+      - name: Verify engine dependency closure + docs consistency
+        # No release ships on an incoherent runtime family or a doc that has
+        # drifted from the code — fail before build.
+        run: |
+          npm run verify:closure
+          npm run verify:docs
 
       - name: Install dependencies
         run: npm ci
@@ -38,8 +41,23 @@ jobs:
       - name: Bundle Chromium for the browser plugin
         run: PLAYWRIGHT_BROWSERS_PATH=resources/browsers npx playwright install chromium
 
-      - name: Build dmg + zip (unsigned)
-        run: CSC_IDENTITY_AUTO_DISCOVERY=false npx electron-builder --mac -c.mac.notarize=false --publish never
+      - name: Build dmg + zip (signed + notarized when secrets present)
+        # With CSC_LINK (base64 Developer ID p12) + Apple notarization secrets
+        # set on the repo, electron-builder signs and notarizes; without them
+        # the workflow degrades to the unsigned build. `--publish never` — the
+        # gh step below owns the upload.
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ -n "$CSC_LINK" ]; then
+            npx electron-builder --mac --publish never
+          else
+            CSC_IDENTITY_AUTO_DISCOVERY=false npx electron-builder --mac -c.mac.notarize=false --publish never
+          fi
 
       - name: Upload artifacts to the Release
         env:
@@ -50,3 +68,32 @@ jobs:
             || gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Dsh GUI $TAG" --generate-notes
           gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber \
             dist/*.dmg dist/*.zip dist/*.blockmap dist/latest-mac.yml
+
+      # The mirror is the app's default update feed, so it must never lag the
+      # Release. electron-builder writes dot-named files locally while
+      # latest-mac.yml references dash-named URLs — upload under the dashed
+      # name so the feed resolves.
+      - name: Mirror artifacts to the update CDN
+        # Skip silently when the mirror credentials are not configured (forks).
+        if: ${{ secrets.OSS_KEY_ID != '' }}
+        env:
+          OSS_KEY_ID: ${{ secrets.OSS_KEY_ID }}
+          OSS_KEY_SECRET: ${{ secrets.OSS_KEY_SECRET }}
+          OSS_ENDPOINT: oss-cn-hangzhou.aliyuncs.com
+          OSS_BUCKET: merefusion-static
+          OSS_PREFIX: dsh-gui
+        run: |
+          set -euo pipefail
+          curl -fsSL -o ossutil.zip https://gosspublic.alicdn.com/ossutil/v2/2.1.1/ossutil-2.1.1-mac-arm64.zip
+          unzip -q -j ossutil.zip -d ossutil-bin
+          chmod +x ossutil-bin/ossutil
+          for f in dist/*.dmg dist/*.zip dist/*.blockmap dist/latest-mac.yml; do
+            [ -e "$f" ] || continue
+            base=$(basename "$f")
+            # Dsh.GUI-1.2.0-arm64.dmg -> Dsh-GUI-1.2.0-arm64.dmg
+            dest=$(echo "$base" | sed 's/^Dsh\.GUI/Dsh-GUI/')
+            ossutil-bin/ossutil cp -f "$f" "oss://$OSS_BUCKET/$OSS_PREFIX/$dest" \
+              --endpoint "$OSS_ENDPOINT" \
+              --access-key-id "$OSS_KEY_ID" \
+              --access-key-secret "$OSS_KEY_SECRET"
+          done

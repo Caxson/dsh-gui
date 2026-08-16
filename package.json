@@ -17,6 +17,7 @@
     "start": "electron .",
     "smoke": "DSH_GUI_SMOKE=1 electron .",
     "verify:closure": "node scripts/verify-runtime-closure.mjs",
+    "verify:docs": "node scripts/verify-docs-consistency.mjs",
     "icon": "node scripts/make-icon.js",
     "vendor": "node scripts/vendor-panel.js",
     "postinstall": "node scripts/vendor-panel.js",

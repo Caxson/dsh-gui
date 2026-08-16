@@ -24,6 +24,11 @@ jobs:
         # picked up) before we spend time installing or booting anything.
         run: npm run verify:closure
 
+      - name: Verify bilingual docs consistency
+        # Committed-file only: README must keep both languages and stay in
+        # step with package.json / electron-builder.yml / src/main.js.
+        run: npm run verify:docs
+
       - name: Install dependencies
         run: npm ci
 

@@ -30,10 +30,11 @@ npmRebuild: false
 mac:
   category: public.app-category.developer-tools
   icon: build/icon.icns
-  # Signed + notarized distribution. Requires a "Developer ID Application"
-  # certificate in the login keychain and APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD /
-  # APPLE_TEAM_ID in the environment. Until those exist, build with
-  # `npm run dist:unsigned`.
+  # Signed + notarized distribution. Locally, electron-builder picks up the
+  # "Developer ID Application" certificate from the login keychain; in CI, the
+  # release workflow feeds it CSC_LINK (base64 p12) + APPLE_ID /
+  # APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID from repo secrets. Without a
+  # certificate the build degrades to unsigned (`npm run dist:unsigned`).
   hardenedRuntime: true
   gatekeeperAssess: false
   entitlements: build/entitlements.mac.plist
