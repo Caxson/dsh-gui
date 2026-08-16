@@ -195,10 +195,13 @@ jobs:
               --access-key-id "$OSS_KEY_ID" \
               --access-key-secret "$OSS_KEY_SECRET"
           }
-          # Release artifacts + update feed.
+          # Release artifacts + update feed. electron-builder names files after
+          # the product ("Dsh GUI-1.3.0-arm64.dmg") but writes dashed URLs into
+          # latest-mac.yml, so upload under the dashed name or the feed and the
+          # download page both point at objects that do not exist.
           for f in out/*; do
             base=$(basename "$f")
-            put "$f" "oss://$OSS_BUCKET/$OSS_PREFIX/$(echo "$base" | sed 's/^Dsh\.GUI/Dsh-GUI/')"
+            put "$f" "oss://$OSS_BUCKET/$OSS_PREFIX/$(echo "$base" | tr ' ' '-')"
           done
           # Download page (page + its assets) at the site bucket's root.
           ossutil-bin/ossutil cp -f -r dist-site/ "oss://$OSS_SITE_BUCKET/" \
@@ -206,3 +209,25 @@ jobs:
             --region "$OSS_REGION" \
             --access-key-id "$OSS_KEY_ID" \
             --access-key-secret "$OSS_KEY_SECRET"
+
+      # Uploading is not the same as being downloadable: a naming mismatch
+      # between the feed and the stored objects leaves the update feed and the
+      # download page pointing at 404s while every step above reports success.
+      # Fetch each URL the feed advertises and fail if any is missing.
+      - name: Verify every advertised download resolves
+        if: env.HAS_MIRROR == 'true'
+        env:
+          BASE: https://merefusion-static.oss-cn-hangzhou.aliyuncs.com/dsh-gui
+        run: |
+          set -euo pipefail
+          urls=$(grep -oE '^\s+- url: .+$' out/latest-mac.yml | awk '{print $3}')
+          [ -n "$urls" ] || { echo "feed advertises no files"; exit 1; }
+          fail=0
+          for u in $urls; do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' -r 0-0 "$BASE/$u" || echo 000)
+            case "$code" in
+              200|206) echo "  ok  $u" ;;
+              *) echo "  MISSING ($code)  $u"; fail=1 ;;
+            esac
+          done
+          [ "$fail" = 0 ] || { echo "the mirror does not serve what the feed advertises"; exit 1; }
