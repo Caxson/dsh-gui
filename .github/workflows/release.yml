@@ -70,9 +70,15 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           ARCH: ${{ matrix.arch }}
         run: |
-          if [ -n "$CSC_LINK" ]; then
+          # Signing without notarization buys nothing on modern macOS —
+          # Gatekeeper still blocks a downloaded app — and would fail the build
+          # outright, since notarize is on. So take the signed path only when
+          # the whole credential set is present, and say which way it went.
+          if [ -n "$CSC_LINK" ] && [ -n "$APPLE_ID" ] && [ -n "$APPLE_APP_SPECIFIC_PASSWORD" ] && [ -n "$APPLE_TEAM_ID" ]; then
+            echo "building signed + notarized ($ARCH)"
             npx electron-builder --mac --$ARCH --publish never
           else
+            echo "building UNSIGNED ($ARCH) — signing/notarization secrets incomplete"
             CSC_IDENTITY_AUTO_DISCOVERY=false npx electron-builder --mac --$ARCH -c.mac.notarize=false --publish never
           fi
 
