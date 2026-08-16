@@ -17,6 +17,8 @@ import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { searchHub } from './lib/hub.mjs'
+
 export const name = 'dsh-gui-market'
 export const inject = ['webServer', 'loader']
 
@@ -292,10 +294,18 @@ export function apply(ctx) {
     path: '/api/market/search',
     handler: guard(async (req, res) => {
       const params = new URL(req.url, 'http://x').searchParams
-      const source = params.get('source') === 'github' ? 'github' : 'npm'
+      const raw = params.get('source')
+      const source = raw === 'github' ? 'github' : raw === 'hub' ? 'hub' : 'npm'
       const strict = params.get('strict') !== '0'
       const query = (params.get('q') ?? '').trim() || 'dsh-plugin'
       try {
+        if (source === 'hub') {
+          // The hub index is dsh-native and already deduped by id; `strict`
+          // here means "curated only" (featured / registry-verified).
+          const { rows, total } = await searchHub(query, strict)
+          sendJson(res, 200, { results: rows, total })
+          return
+        }
         const rows = source === 'github' ? await searchGithub(query) : await searchNpm(query)
         const deduped = dedupe(rows)
         sendJson(res, 200, { results: strict ? dshOnly(deduped) : deduped })

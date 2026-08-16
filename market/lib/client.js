@@ -31,6 +31,14 @@ window.__ModuleLoader__.load({
       loadFailed: '加载失败',
       retry: '重试',
       empty: '没有找到匹配的插件',
+      onlyDsh: '仅 dsh 生态',
+      onlyCurated: '仅精选',
+      tierVerified: '已验证',
+      tierCommunity: '社区',
+      viewSource: '查看源码',
+      showing: '显示',
+      of: '/',
+      confirmInstall: '将从 GitHub 拉取并安装（固定提交）。仅安装你信任的插件，确定继续？',
     }
     var en = {
       tab: 'Market',
@@ -48,6 +56,14 @@ window.__ModuleLoader__.load({
       loadFailed: 'Failed to load',
       retry: 'Retry',
       empty: 'No matching plugins',
+      onlyDsh: 'dsh ecosystem only',
+      onlyCurated: 'Curated only',
+      tierVerified: 'verified',
+      tierCommunity: 'community',
+      viewSource: 'View source',
+      showing: 'Showing',
+      of: 'of',
+      confirmInstall: 'This fetches and installs from GitHub at a pinned commit. Only install plugins you trust — continue?',
     }
 
     exports.name = 'dsh-gui-market-client'
@@ -97,6 +113,15 @@ window.__ModuleLoader__.load({
         margin: '6px 0 0',
       },
       link: { color: 'inherit', opacity: 0.6, fontSize: 11, textDecoration: 'underline' },
+      chipVerified: {
+        fontSize: 10, padding: '1px 7px', borderRadius: 999,
+        background: 'rgba(63,185,80,0.16)', color: 'inherit', opacity: 0.9,
+      },
+      chipTag: {
+        fontSize: 10, padding: '1px 7px', borderRadius: 999,
+        background: 'rgba(65,118,230,0.14)', color: 'inherit', opacity: 0.8,
+      },
+      note: { fontSize: 11, opacity: 0.5, marginLeft: 'auto' },
     }
 
     // Package/registry metadata is publisher-controlled; only render http(s)
@@ -141,17 +166,27 @@ window.__ModuleLoader__.load({
       var meta = []
       if (r.version) meta.push('v' + r.version)
       if (typeof r.stars === 'number') meta.push('★ ' + r.stars)
+      var head = [h('span', { key: 'n', style: S.name }, r.name)]
+      // Two-tier trust: a verified (registry-admitted) chip when present,
+      // otherwise the community tier is implicit. Category/kind as a soft tag.
+      if (r.tier === 'verified') head.push(h('span', { key: 'tv', style: S.chipVerified }, t('tierVerified')))
+      if (r.category || r.kind) head.push(h('span', { key: 'cat', style: S.chipTag }, r.category || r.kind))
+      if (meta.length) head.push(h('span', { key: 'm', style: S.dim }, meta.join(' · ')))
+      if (safeUrl(r.url)) head.push(h('a', { key: 'u', style: S.link, href: safeUrl(r.url), target: '_blank', rel: 'noreferrer' }, r.source))
+      // installable === undefined means a legacy npm/github row (always
+      // installable); an explicit false (hub) means browse-only.
+      var canInstall = r.installable !== false && !!r.spec
+      head.push(
+        canInstall
+          ? h('button', {
+              key: 'b', style: Object.assign({}, S.btn, { marginLeft: 'auto' }),
+              disabled: busy,
+              onClick: function () { props.onInstall(r) },
+            }, busy ? t('installingBtn') : t('installBtn'))
+          : h('span', { key: 'note', style: S.note }, r.note || t('viewSource'))
+      )
       return h('div', { style: S.card },
-        h('div', { style: S.cardHead },
-          h('span', { style: S.name }, r.name),
-          meta.length ? h('span', { style: S.dim }, meta.join(' · ')) : null,
-          safeUrl(r.url) ? h('a', { style: S.link, href: safeUrl(r.url), target: '_blank', rel: 'noreferrer' }, r.source) : null,
-          h('button', {
-            style: Object.assign({}, S.btn, { marginLeft: 'auto' }),
-            disabled: busy,
-            onClick: function () { props.onInstall(r.spec) },
-          }, busy ? t('installingBtn') : t('installBtn'))
-        ),
+        h('div', { style: S.cardHead }, head),
         h('p', { style: S.desc }, r.description || t('noDescription'))
       )
     }
@@ -161,7 +196,7 @@ window.__ModuleLoader__.load({
       var installedPair = react.useState({ status: 'loading' })
       var installed = installedPair[0]
       var setInstalled = installedPair[1]
-      var sourcePair = react.useState('npm')
+      var sourcePair = react.useState('hub')
       var strictPair = react.useState(true)
       var queryPair = react.useState('')
       var resultsPair = react.useState(null)
@@ -187,13 +222,19 @@ window.__ModuleLoader__.load({
         fetch(url, { cache: 'no-store' })
           .then(function (res) { return res.json() })
           .then(function (data) {
-            resultsPair[1](data.error ? { error: data.error } : { rows: data.results || [] })
+            resultsPair[1](data.error ? { error: data.error } : { rows: data.results || [], total: data.total })
           })
           .catch(function (err) { resultsPair[1]({ error: String(err && err.message ? err.message : err) }) })
           .then(function () { searchingPair[1](false) })
       }
 
-      function installSpec(spec) {
+      function installSpec(r) {
+        var spec = typeof r === 'string' ? r : r.spec
+        // Community-tier (not registry-verified) installs run third-party code
+        // from GitHub — get explicit consent before pulling it.
+        if (r && typeof r === 'object' && r.source === 'hub' && r.tier !== 'verified') {
+          if (typeof window !== 'undefined' && window.confirm && !window.confirm(t('confirmInstall'))) return
+        }
         installingPair[1](spec)
         installDonePair[1](null)
         fetch('/api/market/install', {
@@ -219,6 +260,7 @@ window.__ModuleLoader__.load({
             style: S.select, value: sourcePair[0],
             onChange: function (e) { sourcePair[1](e.currentTarget.value) },
           },
+            h('option', { value: 'hub' }, 'Hub'),
             h('option', { value: 'npm' }, 'npm'),
             h('option', { value: 'github' }, 'GitHub')
           ),
@@ -235,7 +277,7 @@ window.__ModuleLoader__.load({
               type: 'checkbox', checked: strictPair[0],
               onChange: function (e) { strictPair[1](e.currentTarget.checked) },
             }),
-            '仅 dsh 生态')
+            sourcePair[0] === 'hub' ? t('onlyCurated') : t('onlyDsh'))
         ),
         installDonePair[0]
           ? h('div', { style: { marginTop: 8 } },
@@ -253,13 +295,20 @@ window.__ModuleLoader__.load({
           ? h('div', { style: { marginTop: 10 } },
               resultsPair[0].rows.length === 0
                 ? h('p', { style: S.dim }, t('empty'))
-                : resultsPair[0].rows.map(function (r) {
-                    return h(SearchRow, {
-                      key: r.spec, result: r, t: t,
-                      busy: installingPair[0] === r.spec,
-                      onInstall: installSpec,
-                    })
-                  }))
+                : [
+                    typeof resultsPair[0].total === 'number' && resultsPair[0].total > resultsPair[0].rows.length
+                      ? h('p', { key: 'count', style: Object.assign({ margin: '0 0 8px' }, S.dim) },
+                          t('showing') + ' ' + resultsPair[0].rows.length + ' ' + t('of') + ' ' + resultsPair[0].total)
+                      : null,
+                    resultsPair[0].rows.map(function (r) {
+                      var key = r.id || r.spec || r.name
+                      return h(SearchRow, {
+                        key: key, result: r, t: t,
+                        busy: !!r.spec && installingPair[0] === r.spec,
+                        onInstall: installSpec,
+                      })
+                    }),
+                  ])
           : null
       )
 
