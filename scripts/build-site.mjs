@@ -29,10 +29,10 @@ function parseFeed(text) {
   const re = /-\s*url:\s*(\S+)[\s\S]*?size:\s*(\d+)/g
   let m
   while ((m = re.exec(text)) !== null) {
-    // The mirror serves dash-named artifacts; electron-builder writes the
-    // local dot-named form for the product name. Normalize so the page's
-    // links resolve against the CDN prefix.
-    files.push({ url: m[1].replace(/^Dsh\.GUI/, 'Dsh-GUI'), size: Number(m[2]) })
+    // The mirror stores artifacts under the dashed name (electron-builder
+    // names the files after the product, "Dsh GUI-…", but writes dashed URLs
+    // into the feed). Normalize so the page's links resolve either way.
+    files.push({ url: m[1].replace(/ /g, '-'), size: Number(m[2]) })
   }
   if (files.length === 0) throw new Error('no files listed in the feed')
   return { version, files }
