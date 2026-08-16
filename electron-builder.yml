@@ -40,14 +40,14 @@ mac:
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
   notarize: true
+  # Architecture comes from the CLI (`--arm64` / `--x64`). The app bundles a
+  # Chromium build for the browser pane and Chromium is architecture-specific,
+  # so each arch is built on a runner of that architecture and the resulting
+  # feeds are merged (scripts/merge-mac-feed.mjs).
   target:
     - target: dmg
-      arch:
-        - arm64
     # The zip + latest-mac.yml are what the app's built-in auto-updater uses.
     - target: zip
-      arch:
-        - arm64
 
 # Self-update feed: GitHub Releases is the canonical channel (electron-builder
 # embeds it into app-update.yml and generates latest-mac.yml next to the zip).

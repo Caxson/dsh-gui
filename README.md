@@ -20,36 +20,44 @@ injected through DSH's own plugin/patch system.
   - **侧边聊天** — 临时轻量聊天（⌥⌘S），流式回复，关闭应用即消失，不打扰主会话
 - 🔌 桌面行为全部以 DSH 插件（profile patch overlay）实现：`bridge/`（活动采集 + 共享 PTY + `terminal_send` 工具）、`browser/`（实时浏览器）
 - 🔒 引擎只绑定 127.0.0.1，外部链接自动走系统浏览器
-- 🔄 自动更新走 GitHub Releases；大陆用户可用 `DSH_GUI_UPDATE_URL` 指向镜像源
+- 🔄 自动更新默认走国内 CDN 镜像（大陆下载更快更稳）；`DSH_GUI_UPDATE_URL=github`
+  可切回 GitHub Releases，或填任意自建镜像地址
 
 ## 安装 / Install
 
-> 目前仅提供 Apple Silicon (arm64) 版本。Currently Apple Silicon (arm64) only.
+> 提供 Apple Silicon (`arm64`) 与 Intel (`x64`) 两个版本，请按芯片选择。
+> Both Apple Silicon (`arm64`) and Intel (`x64`) builds are published.
 
-1. 从 [Releases](https://github.com/Caxson/dsh-gui/releases) 下载最新 `Dsh.GUI-<版本>-arm64.dmg`
+1. 从[下载页](https://dsh.merefusion.com)（自动识别芯片）或
+   [Releases](https://github.com/Caxson/dsh-gui/releases) 下载对应的
+   `Dsh-GUI-<版本>-arm64.dmg` / `Dsh-GUI-<版本>-x64.dmg`
 2. 双击打开，把 **Dsh GUI** 拖进「应用程序」
-3. **首次打开前**在终端执行一次（见下方说明）：
-
-   ```bash
-   xattr -cr "/Applications/Dsh GUI.app"
-   ```
-
+3. 首次打开：Gatekeeper 会弹一次确认框，点「打开」即可（见下方说明）
 4. 打开后进入 **设置 → 模型** 填入 DeepSeek（或任意 OpenAI 兼容）API Key，开聊
 
 > 数据目录：机器上已有 `~/.dsh`（用过 dsh CLI / `dsh web`）时直接复用它——
 > 会话、模型、插件与命令行侧完全同步；没有才使用
 > `~/Library/Application Support/Dsh GUI/dsh-home`。`DSH_GUI_HOME` 环境变量可覆盖。
 
-### 为什么会提示「已损坏，无法打开」？
+### 首次打开被 Gatekeeper 拦住了？
 
-这不是文件真的损坏。本项目未购买 Apple 开发者证书（$99/年），macOS Gatekeeper
-会拦截所有从网络下载的未签名应用，并把它们统一报成「已损坏」。上面的 `xattr`
-命令只是移除下载时附加的隔离标记，App 本身开源可审计，构建产物由
-GitHub Releases 直出。First launch of an unsigned app is blocked by Gatekeeper
-with a misleading "damaged" alert — the one-time `xattr -cr` above clears the
-quarantine flag; the app is open source and built straight from this repo.
-数据在 `~/Library/Application Support/Dsh GUI/dsh-home`，独立于你已有的 `~/.dsh`；
-想复用现有 home：`DSH_GUI_HOME="$HOME/.dsh" open "/Applications/Dsh GUI.app"`。
+签名与公证已接入发布流程：仓库配置了 Developer ID 证书与公证凭证时，
+CI 产出的就是已签名并公证的包，首次打开只会弹一次「来自互联网的 App」
+确认框，点「打开」即可。
+
+如果你下载到的是**未签名**的构建（凭证缺失时 CI 会降级产出），macOS 会
+把它统一报成「已损坏，无法打开」——这不是文件真的损坏，执行一次即可：
+
+```bash
+xattr -cr "/Applications/Dsh GUI.app"
+```
+
+Signing and notarization are wired into the release pipeline: when the signing
+credentials are present, CI produces signed + notarized builds and macOS only
+shows the one-time "app downloaded from the internet" prompt. If you got an
+unsigned build (CI degrades to unsigned when credentials are absent),
+Gatekeeper reports it as "damaged" — the one-time `xattr -cr` above clears the
+quarantine flag.
 
 ## 开发 / Development
 
@@ -73,10 +81,15 @@ plugins/desktop.patch.yml   挂到 web profile 的 loader patch 覆盖层
 
 ## 发版 / Release
 
-`package.json` 改版本号 → `npm run dist` → 产物（dmg / zip / blockmap /
-latest-mac.yml）传 GitHub Releases，老用户自动更新。
-未签名构建也能检测新版本，但会退回「打开下载页手动装」；
-完整自动替换需要 Apple Developer 签名 + 公证（配置已就绪，见 electron-builder.yml）。
+`package.json` 改版本号 → 打 `vX.Y.Z` tag 推送到 GitHub，Actions 云构建自动
+发版：依赖闭包 + 文档一致性校验 → dmg + zip（arm64）→ Apple Developer ID
+签名 + 公证 → 挂到 GitHub Releases 并同步 OSS 镜像，老用户自动更新；大陆
+用户可用 `DSH_GUI_UPDATE_URL` 指向镜像源。
+未配置签名 secrets 时（如 fork），构建自动退回未签名版——功能不受影响，
+只是首次打开需右键 →「打开」。
+Releases are built on GitHub Actions with Developer ID signing +
+notarization; without signing secrets the workflow falls back to unsigned
+artifacts automatically.
 
 ## License
 

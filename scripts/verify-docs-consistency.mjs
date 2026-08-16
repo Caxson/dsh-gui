@@ -105,20 +105,26 @@ function main() {
     `package.json repository.url is "${repoUrl}"`,
   )
 
-  // arm64-only: README claim ↔ electron-builder mac.target (dmg + zip, arm64).
+  // mac targets: dmg + zip must both stay (the zip backs the auto-updater).
   const macBlock = builder.split(/^mac:/m)[1] ?? ''
   const targetBlock = (macBlock.split(/^publish:/m)[0] ?? macBlock)
   check(
-    /arm64/.test(targetBlock),
-    'facts: electron-builder no longer targets arm64 (README says arm64-only)',
-  )
-  check(
-    !/x64/.test(targetBlock),
-    'facts: electron-builder gained an x64 target the README does not mention',
-  )
-  check(
     /- target: dmg/.test(targetBlock) && /- target: zip/.test(targetBlock),
     'facts: electron-builder mac targets (dmg/zip) drifted from README claims',
+  )
+
+  // Architectures: the release workflow builds one job per arch, and the
+  // README must name both so users know an Intel build exists.
+  const release = read('.github/workflows/release.yml')
+  for (const arch of ['arm64', 'x64']) {
+    check(
+      new RegExp(`arch:\\s*${arch}`).test(release),
+      `facts: release workflow no longer builds ${arch}`,
+    )
+  }
+  check(
+    /Apple Silicon|Apple 芯片/.test(readme) && /Intel/.test(readme),
+    'facts: README does not mention both Apple Silicon and Intel builds',
   )
 
   // update artifacts: README artifact list ↔ electron-builder targets/publish.
