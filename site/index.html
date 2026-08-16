@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dsh GUI — DeepSeek Harness 的 macOS 桌面客户端</title>
+<meta name="description" content="Dsh GUI 是 DeepSeek Harness (DSH) 的 macOS 桌面客户端，支持 Apple Silicon 与 Intel。下载即用。">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%234D6BFE'/%3E%3Ctext x='16' y='22' font-size='17' font-family='ui-monospace,monospace' fill='white' text-anchor='middle'%3E%3E_%3C/text%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #6b7280;
+    --line: #e8e8ed;
+    --brand: #4d6bfe;
+    --brand-hover: #3d5bee;
+    --surface: #f7f8fa;
+    --radius: 12px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1013;
+      --fg: #f2f2f5;
+      --muted: #9096a3;
+      --line: #24262c;
+      --surface: #17181d;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font: 15px/1.65 -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
+          "Helvetica Neue", Helvetica, "Microsoft YaHei", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: inherit; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 0 24px; }
+
+  header { padding: 26px 0; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; letter-spacing: -0.01em; }
+  .mark {
+    width: 30px; height: 30px; border-radius: 7px; background: var(--brand);
+    color: #fff; display: grid; place-items: center;
+    font: 600 14px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  .hero { padding: 56px 0 40px; text-align: center; }
+  h1 {
+    margin: 0 0 16px;
+    font-size: clamp(32px, 6vw, 46px);
+    line-height: 1.15;
+    letter-spacing: -0.03em;
+    font-weight: 600;
+  }
+  .tagline { margin: 0 auto 34px; max-width: 520px; color: var(--muted); font-size: 17px; }
+
+  .actions { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 9px;
+    min-width: 290px; padding: 14px 26px;
+    background: var(--brand); color: #fff;
+    border: 1px solid transparent; border-radius: var(--radius);
+    font-size: 15.5px; font-weight: 500; text-decoration: none;
+    transition: background .15s ease, transform .12s ease;
+  }
+  /* `display: inline-flex` would otherwise defeat the hidden attribute. */
+  .btn[hidden] { display: none; }
+  .btn:hover { background: var(--brand-hover); }
+  .btn:active { transform: translateY(1px); }
+  .btn[aria-disabled="true"] { background: var(--surface); color: var(--muted); border-color: var(--line); pointer-events: none; }
+  .btn-alt {
+    background: transparent; color: var(--fg); border-color: var(--line);
+    font-size: 14px; padding: 10px 20px; min-width: 0;
+  }
+  .btn-alt:hover { background: var(--surface); }
+  .meta { color: var(--muted); font-size: 13px; margin-top: 6px; }
+  .meta b { color: var(--fg); font-weight: 500; }
+
+  .cards { display: grid; gap: 14px; grid-template-columns: 1fr 1fr; margin: 46px 0 8px; }
+  @media (max-width: 620px) { .cards { grid-template-columns: 1fr; } }
+  .card { border: 1px solid var(--line); border-radius: var(--radius); padding: 18px 20px; background: var(--surface); }
+  .card h3 { margin: 0 0 6px; font-size: 14.5px; font-weight: 600; }
+  .card p { margin: 0; color: var(--muted); font-size: 13.5px; }
+
+  section { padding: 34px 0; border-top: 1px solid var(--line); margin-top: 46px; }
+  h2 { font-size: 17px; font-weight: 600; margin: 0 0 14px; letter-spacing: -0.01em; }
+  ol, ul { margin: 0; padding-left: 20px; color: var(--muted); }
+  li { margin: 7px 0; }
+  li b { color: var(--fg); font-weight: 500; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12.5px; background: var(--surface);
+    border: 1px solid var(--line); border-radius: 6px; padding: 1.5px 6px;
+  }
+  footer {
+    border-top: 1px solid var(--line); margin-top: 34px;
+    padding: 24px 0 46px; color: var(--muted); font-size: 13px;
+    display: flex; justify-content: space-between; gap: 14px; flex-wrap: wrap;
+  }
+  footer a { text-decoration: none; }
+  footer a:hover { color: var(--fg); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <div class="brand"><span class="mark">&gt;_</span> Dsh GUI</div>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="hero">
+    <h1>DeepSeek Harness<br>的桌面客户端</h1>
+    <p class="tagline">
+      把 DSH 引擎装进一个 macOS 应用：多标签终端、内置浏览器、插件市场、
+      跨工具会话导入。开源，开箱即用。
+    </p>
+
+    <div class="actions">
+      <a id="primary" class="btn" href="#" aria-disabled="true">正在获取最新版本…</a>
+      <a id="secondary" class="btn btn-alt" href="#" hidden></a>
+      <p class="meta" id="meta"></p>
+    </div>
+  </div>
+
+  <div class="cards">
+    <div class="card">
+      <h3>多标签工作区</h3>
+      <p>浏览器式标签页承载终端、文件、网页与侧边聊天，可弹出为独立窗口。</p>
+    </div>
+    <div class="card">
+      <h3>插件市场</h3>
+      <p>直接搜索安装 DSH 生态插件，带中文描述、分类与可安装性标注。</p>
+    </div>
+    <div class="card">
+      <h3>跨工具会话导入</h3>
+      <p>把 Claude Code、Codex、pi 的历史会话压缩成简报，在 DSH 里接着干。</p>
+    </div>
+    <div class="card">
+      <h3>自动更新</h3>
+      <p>国内 CDN 分发增量更新包，新版本自动下载，重启即完成。</p>
+    </div>
+  </div>
+
+  <section>
+    <h2>安装</h2>
+    <ol>
+      <li>下载对应芯片的 <code>.dmg</code>，双击打开</li>
+      <li>把 <b>Dsh GUI</b> 拖进「应用程序」</li>
+      <li>首次打开时 macOS 会确认一次「来自互联网的 App」，点<b>打开</b></li>
+      <li>进入 <b>设置 → 模型</b>，填入 DeepSeek（或任意 OpenAI 兼容）API Key</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>说明</h2>
+    <ul>
+      <li>需要 <b>macOS 11 及以上</b>。Apple Silicon 与 Intel 各有独立安装包。</li>
+      <li>机器上已有 <code>~/.dsh</code>（用过 dsh CLI 或 <code>dsh web</code>）会直接复用，
+          会话与命令行侧完全同步。</li>
+      <li>本站只提供下载，源码与发行版本托管在 GitHub，构建过程公开可查。</li>
+    </ul>
+  </section>
+</main>
+
+<footer class="wrap">
+  <span>Dsh GUI · MIT License</span>
+  <span>
+    <a href="https://github.com/Caxson/dsh-gui">GitHub</a> ·
+    <a href="https://github.com/Caxson/dsh-gui/releases">全部版本</a> ·
+    <a href="https://github.com/deepseek-ai/deepseek-harness">DSH 引擎</a>
+  </span>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+  // Artifacts and the update feed live on the same CDN prefix as this page's
+  // downloads. Reading latest-mac.yml at load time means a new release is live
+  // here the moment it is mirrored — the page never needs redeploying.
+  var BASE = 'https://merefusion-static.oss-cn-hangzhou.aliyuncs.com/dsh-gui/';
+  var FEED = BASE + 'latest-mac.yml';
+  var RELEASES = 'https://github.com/Caxson/dsh-gui/releases';
+
+  // Baked at deploy time from the release's own latest-mac.yml (see
+  // scripts/build-site.mjs). The page is fully functional from this alone —
+  // the live fetch below is a progressive enhancement that lets an
+  // already-deployed page pick up a newer release, and is expected to fail
+  // when the page and the artifacts are not same-origin (CORS).
+  var BAKED = /*__FEED__*/null/*__FEED__*/;
+
+  var primary = document.getElementById('primary');
+  var secondary = document.getElementById('secondary');
+  var meta = document.getElementById('meta');
+
+  /** Apple Silicon detection, Rosetta included (translated JS reports Intel). */
+  function isAppleSilicon() {
+    var p = navigator.platform || '';
+    var ua = navigator.userAgent || '';
+    if (!/Mac/i.test(p) && !/Mac/i.test(ua)) return null; // not a Mac
+    try {
+      // Rosetta-translated browsers still expose an Apple GPU renderer string.
+      var gl = document.createElement('canvas').getContext('webgl');
+      var ext = gl && gl.getExtension('WEBGL_debug_renderer_info');
+      var r = ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : '';
+      if (/Apple\s*M\d/i.test(r) || /Apple GPU/i.test(r)) return true;
+    } catch (e) { /* WebGL blocked — fall through */ }
+    // Fallback signal: Apple Silicon Macs report far more logical cores than
+    // the dual-core Intel Airs, but this is only a hint, never authoritative.
+    return navigator.hardwareConcurrency >= 8 ? true : null;
+  }
+
+  function bytes(n) {
+    return n > 0 ? (n / 1048576).toFixed(0) + ' MB' : '';
+  }
+
+  /** Minimal, defensive parse of the fields we need out of latest-mac.yml. */
+  function parseFeed(text) {
+    var version = (/^version:\s*(.+)$/m.exec(text) || [])[1];
+    if (!version) throw new Error('no version in feed');
+    version = version.trim().replace(/^['"]|['"]$/g, '');
+    var files = [];
+    var re = /-\s*url:\s*(\S+)[\s\S]*?size:\s*(\d+)/g, m;
+    while ((m = re.exec(text)) !== null) files.push({ url: m[1], size: +m[2] });
+    return { version: version, files: files };
+  }
+
+  function pick(files, wantArm) {
+    for (var i = 0; i < files.length; i++) {
+      var f = files[i];
+      if (!/\.dmg$/i.test(f.url)) continue;
+      var arm = /arm64/i.test(f.url);
+      if (arm === wantArm) return f;
+    }
+    return null;
+  }
+
+  function setLink(el, label, file, sub) {
+    el.textContent = label + (file.size ? ' · ' + bytes(file.size) : '');
+    el.href = BASE + file.url;
+    el.setAttribute('download', '');
+    el.removeAttribute('aria-disabled');
+    el.hidden = false;
+    if (sub) el.title = sub;
+  }
+
+  function degrade(msg) {
+    primary.textContent = '前往 GitHub 下载';
+    primary.href = RELEASES;
+    primary.removeAttribute('aria-disabled');
+    primary.removeAttribute('download');
+    secondary.hidden = true;
+    meta.textContent = msg;
+  }
+
+  function render(feed) {
+      var arm = pick(feed.files, true);
+      var intel = pick(feed.files, false);
+      if (!arm && !intel) throw new Error('no dmg in feed');
+
+      var silicon = isAppleSilicon();
+      // Unknown chip (or not a Mac) → lead with Apple Silicon, the common case,
+      // but keep the Intel build one click away rather than hiding it.
+      var leadArm = silicon !== false;
+      var lead = (leadArm ? arm : intel) || arm || intel;
+      var other = lead === arm ? intel : arm;
+
+      setLink(primary, '下载 ' + (lead === arm ? 'Apple 芯片' : 'Intel 芯片') + '版', lead);
+      if (other) {
+        setLink(secondary, '我用的是 ' + (other === arm ? 'Apple 芯片' : 'Intel 芯片'), other);
+        secondary.className = 'btn btn-alt';
+      }
+      var note = silicon === null ? '未能识别芯片，已默认 Apple 芯片版' : '';
+      meta.innerHTML = '版本 <b>' + feed.version + '</b> · macOS 11+' + (note ? ' · ' + note : '');
+      return true;
+  }
+
+  function safeRender(feed) {
+    try {
+      return feed && feed.files && feed.files.length ? render(feed) : false;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // 1) Render immediately from the baked feed so the page is useful even with
+  //    no network beyond this document.
+  var rendered = safeRender(BAKED);
+  if (!rendered) degrade('正在获取版本信息…');
+
+  // 2) Then try the live feed; only replace the UI if it actually parses.
+  //    A CORS/offline failure leaves the baked render untouched.
+  fetch(FEED, { cache: 'no-store' })
+    .then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.text();
+    })
+    .then(function (text) {
+      safeRender(parseFeed(text));
+    })
+    .catch(function (err) {
+      if (!rendered) degrade('暂时无法获取最新版本信息（' + err.message + '）');
+    });
+})();
+</script>
+
+</body>
+</html>
