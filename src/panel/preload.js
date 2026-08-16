@@ -28,4 +28,9 @@ contextBridge.exposeInMainWorld('dshPanel', {
   openTerminals: (ids) => ipcRenderer.send('panel:terminals', ids),
   collapsePanel: () => ipcRenderer.send('panel:collapse'),
   popOut: () => ipcRenderer.send('panel:popout'),
+
+  // Chromium ships separately from the app and is fetched on first use.
+  browserStatus: () => ipcRenderer.invoke('panel:browser-status'),
+  browserInstall: () => ipcRenderer.invoke('panel:browser-install'),
+  onBrowserProgress: (fn) => ipcRenderer.on('panel:browser-progress', (_e, text) => fn(text)),
 });

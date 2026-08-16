@@ -54,11 +54,6 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Bundle Chromium for the browser plugin
-        # Installs the runner's native Chromium, which is exactly the arch this
-        # job packages.
-        run: PLAYWRIGHT_BROWSERS_PATH=resources/browsers npx playwright install chromium
-
       - name: Build dmg + zip (signed + notarized when secrets present)
         # With CSC_LINK (base64 Developer ID p12) + Apple notarization secrets
         # set on the repo, electron-builder signs and notarizes; without them

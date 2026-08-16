@@ -13,10 +13,10 @@ files:
   - package.json
   - node_modules/**/*
 
-# Bundled Chromium for the browser plugin (resources/browsers/chromium-*).
-extraResources:
-  - from: resources/browsers
-    to: browsers
+# Chromium for the browser pane is NOT bundled: it is ~355MB, roughly 40% of
+# the installed app, and most people never open that tab. It is downloaded on
+# first use into the user data directory instead (src/chromium.js), where it
+# also survives updates rather than being re-shipped with every release.
 
 # DSH's loader resolves plugin packages through Node's internal ESM loader,
 # which cannot read inside the asar archive (the DSH home's node_modules are

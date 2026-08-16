@@ -250,10 +250,51 @@
     img.alt = '';
     const empty = el('div', 'empty');
     empty.id = 'browser-empty';
-    empty.appendChild(el('div', 'empty-glyph', '◐'));
-    empty.appendChild(el('div', '', '浏览器未启动'));
-    empty.appendChild(el('div', 'empty-sub', 'agent 调用 browser 工具后，这里会显示实时画面'));
+    const glyph = el('div', 'empty-glyph', '◐');
+    const title = el('div', '', '浏览器未启动');
+    const sub = el('div', 'empty-sub', 'agent 调用 browser 工具后，这里会显示实时画面');
+    // Chromium ships separately from the app; offer to fetch it rather than
+    // letting the first browser call fail with a missing-executable error.
+    const getBtn = el('button', 'empty-action', '下载浏览器组件');
+    getBtn.hidden = true;
+    const log = el('pre', 'empty-log');
+    log.hidden = true;
+    empty.append(glyph, title, sub, getBtn, log);
     view.append(img, empty);
+
+    function showNeedsInstall() {
+      title.textContent = '需要下载浏览器组件';
+      sub.textContent = '约 150MB，只需下载一次，之后浏览器功能即可使用';
+      getBtn.hidden = false;
+    }
+
+    window.dshPanel.browserStatus().then((s) => {
+      if (!s.installed) showNeedsInstall();
+    }).catch(() => { /* older shell without the check — leave the default copy */ });
+
+    window.dshPanel.onBrowserProgress((text) => {
+      log.hidden = false;
+      log.textContent = (log.textContent + text).slice(-1200);
+      log.scrollTop = log.scrollHeight;
+    });
+
+    getBtn.addEventListener('click', async () => {
+      getBtn.disabled = true;
+      getBtn.textContent = '正在下载…';
+      log.hidden = false;
+      log.textContent = '';
+      const r = await window.dshPanel.browserInstall().catch((e) => ({ ok: false, output: String(e) }));
+      if (r && r.ok) {
+        getBtn.hidden = true;
+        log.hidden = true;
+        title.textContent = '浏览器未启动';
+        sub.textContent = 'agent 调用 browser 工具后，这里会显示实时画面';
+      } else {
+        getBtn.disabled = false;
+        getBtn.textContent = '重试下载';
+        sub.textContent = '下载失败，可重试或检查网络';
+      }
+    });
     const split = el('div', 'pane-split');
     split.appendChild(el('div', 'pane-title', '活动记录'));
     const list = el('div', 'scroll');

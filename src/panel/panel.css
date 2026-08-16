@@ -728,3 +728,36 @@ body {
   color: var(--text-dim);
   font-size: 11px;
 }
+
+/* Chromium is fetched on first use, so the browser pane needs an affordance
+   for starting that download and showing how it is going. */
+.empty-action {
+  margin-top: 10px;
+  padding: 6px 16px;
+  font: inherit;
+  font-size: 12px;
+  color: #fff;
+  background: var(--accent);
+  border: 0;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.empty-action:hover:not(:disabled) { filter: brightness(1.1); }
+.empty-action:disabled { opacity: 0.6; cursor: default; }
+.empty-log {
+  margin: 10px 0 0;
+  max-width: 100%;
+  max-height: 120px;
+  overflow: auto;
+  padding: 8px 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10.5px;
+  line-height: 1.5;
+  text-align: left;
+  color: var(--text-dim);
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}

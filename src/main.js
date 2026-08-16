@@ -17,6 +17,7 @@ const { spawn } = require('node:child_process');
 const { join } = require('node:path');
 const { existsSync, mkdirSync, writeFileSync, readFileSync, symlinkSync } = require('node:fs');
 const { autoUpdater } = require('electron-updater');
+const { resolveBrowsersPath, isInstalled, ensureChromium } = require('./chromium');
 
 const APP_NAME = 'Dsh GUI';
 const APP_ROOT = join(__dirname, '..');
@@ -132,6 +133,7 @@ let bootLog = [];
 const PANEL_WIDTH = 400;
 let panelView = null;
 let popupWin = null; // panel popped out into its own window
+let chromiumInstall = null; // in-flight on-demand Chromium download, if any
 // Hidden by default (Codex-style: surface the panel on demand via Cmd+B).
 // Smoke mode forces it visible so the layout probe can exercise both states.
 let panelVisible = SMOKE;
@@ -396,6 +398,22 @@ function wirePanelIpc() {
     activeTab = tab;
   });
   ipcMain.on('panel:collapse', () => togglePanel());
+
+  // Chromium is fetched on demand, so the browser pane asks whether it is
+  // there and can trigger the download itself.
+  ipcMain.handle('panel:browser-status', () => ({
+    installed: isInstalled(resolveBrowsersPath(app)),
+  }));
+
+  ipcMain.handle('panel:browser-install', async () => {
+    if (chromiumInstall) return chromiumInstall; // one download, not one per click
+    chromiumInstall = ensureChromium(app, (text) => {
+      sendToPanels('panel:browser-progress', text);
+    }).finally(() => {
+      chromiumInstall = null;
+    });
+    return chromiumInstall;
+  });
 }
 
 /**
@@ -498,9 +516,10 @@ function startDshServer(dshHome, onUrl, onFail) {
   if (existsSync(PATCH_FILE)) args.push('--patch', PATCH_FILE);
   args.push('--port', '0');
 
-  // Bundled Chromium for the browser plugin lives at resources/browsers in
-  // packaged builds; in dev Playwright uses its own download cache.
-  const browsersPath = join(process.resourcesPath, 'browsers');
+  // Chromium is fetched on demand into the user data directory (see
+  // src/chromium.js); a build that still bundles it keeps priority. Point the
+  // engine at whichever applies so the browser plugin finds it either way.
+  const browsersPath = resolveBrowsersPath(app);
 
   const child = spawn(process.execPath, args, {
     env: {
