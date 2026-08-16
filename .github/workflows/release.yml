@@ -70,9 +70,15 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           ARCH: ${{ matrix.arch }}
         run: |
-          if [ -n "$CSC_LINK" ]; then
+          # Signing without notarization buys nothing on modern macOS —
+          # Gatekeeper still blocks a downloaded app — and would fail the build
+          # outright, since notarize is on. So take the signed path only when
+          # the whole credential set is present, and say which way it went.
+          if [ -n "$CSC_LINK" ] && [ -n "$APPLE_ID" ] && [ -n "$APPLE_APP_SPECIFIC_PASSWORD" ] && [ -n "$APPLE_TEAM_ID" ]; then
+            echo "building signed + notarized ($ARCH)"
             npx electron-builder --mac --$ARCH --publish never
           else
+            echo "building UNSIGNED ($ARCH) — signing/notarization secrets incomplete"
             CSC_IDENTITY_AUTO_DISCOVERY=false npx electron-builder --mac --$ARCH -c.mac.notarize=false --publish never
           fi
 
@@ -150,21 +156,31 @@ jobs:
           OSS_KEY_ID: ${{ secrets.OSS_KEY_ID }}
           OSS_KEY_SECRET: ${{ secrets.OSS_KEY_SECRET }}
           OSS_ENDPOINT: oss-cn-hangzhou.aliyuncs.com
+          # Artifacts live under a prefix of the shared static bucket; the
+          # download page has its own bucket, whose root is the site served at
+          # the public domain. They are deliberately not the same bucket — the
+          # shared one's root is another site entirely.
           OSS_BUCKET: merefusion-static
           OSS_PREFIX: dsh-gui
+          OSS_SITE_BUCKET: dsh-gui-site
         run: |
           set -euo pipefail
           curl -fsSL -o ossutil.zip https://gosspublic.alicdn.com/ossutil/v2/2.1.1/ossutil-2.1.1-linux-amd64.zip
           unzip -q -j ossutil.zip -d ossutil-bin
           chmod +x ossutil-bin/ossutil
           put() {
-            ossutil-bin/ossutil cp -f "$1" "oss://$OSS_BUCKET/$OSS_PREFIX/$2" \
+            ossutil-bin/ossutil cp -f "$1" "$2" \
               --endpoint "$OSS_ENDPOINT" \
               --access-key-id "$OSS_KEY_ID" \
               --access-key-secret "$OSS_KEY_SECRET"
           }
+          # Release artifacts + update feed.
           for f in out/*; do
             base=$(basename "$f")
-            put "$f" "$(echo "$base" | sed 's/^Dsh\.GUI/Dsh-GUI/')"
+            put "$f" "oss://$OSS_BUCKET/$OSS_PREFIX/$(echo "$base" | sed 's/^Dsh\.GUI/Dsh-GUI/')"
           done
-          put dist-site/index.html "index.html"
+          # Download page (page + its assets) at the site bucket's root.
+          ossutil-bin/ossutil cp -f -r dist-site/ "oss://$OSS_SITE_BUCKET/" \
+            --endpoint "$OSS_ENDPOINT" \
+            --access-key-id "$OSS_KEY_ID" \
+            --access-key-secret "$OSS_KEY_SECRET"

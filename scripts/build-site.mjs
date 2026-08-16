@@ -14,7 +14,7 @@
  * Usage: node scripts/build-site.mjs <latest-mac.yml> [out.html]
  */
 
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync, cpSync, existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -50,8 +50,14 @@ function main() {
   if (!MARKER.test(page)) throw new Error('site/index.html has no /*__FEED__*/ marker to fill')
 
   const baked = page.replace(MARKER, `/*__FEED__*/${JSON.stringify(feed)}/*__FEED__*/`)
-  mkdirSync(dirname(outPath), { recursive: true })
+  const outDir = dirname(outPath)
+  mkdirSync(outDir, { recursive: true })
   writeFileSync(outPath, baked)
+
+  // Page assets (the contact QR) sit next to the page and are referenced by
+  // relative path, so they must travel with it.
+  const assets = join(ROOT, 'site', 'assets')
+  if (existsSync(assets)) cpSync(assets, join(outDir, 'assets'), { recursive: true })
 
   const dmgs = feed.files.filter((f) => f.url.endsWith('.dmg')).map((f) => f.url)
   console.log(`✓ site built for ${feed.version} → ${outPath}`)
