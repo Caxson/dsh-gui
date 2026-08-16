@@ -4,8 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Dsh GUI — DeepSeek Harness 的 macOS 桌面客户端</title>
-<meta name="description" content="Dsh GUI 是 DeepSeek Harness (DSH) 的 macOS 桌面客户端，支持 Apple 芯片与 Intel。下载即用。">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23fff'/%3E%3Ctext x='16' y='22' font-size='16' font-family='ui-monospace,monospace' fill='%23000' text-anchor='middle'%3E%3E_%3C/text%3E%3C/svg%3E">
+<meta name="description" content="Dsh GUI 是 DeepSeek Harness (DSH) 的 macOS 桌面客户端。支持把 Claude Code、Codex、pi 的历史会话自动导入并接着往下干。Apple 芯片与 Intel 均可下载。">
+<link rel="icon" href="assets/logo.png">
+<link rel="apple-touch-icon" href="assets/logo.png">
 <style>
   :root {
     --bg: #000;
@@ -13,14 +14,13 @@
     --muted: #a1a1a6;
     --line: #1f1f1f;
     --card: #0d0d0d;
-    --accent: #4d6bfe;
+    --brand: #2a4bd8;
+    --brand-soft: #4d6bfe;
   }
   * { box-sizing: border-box; }
   html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
   body {
-    margin: 0;
-    background: var(--bg);
-    color: var(--fg);
+    margin: 0; background: var(--bg); color: var(--fg);
     font: 16px/1.6 -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
           "Helvetica Neue", Helvetica, "Microsoft YaHei", Arial, sans-serif;
     -webkit-font-smoothing: antialiased;
@@ -30,42 +30,49 @@
   @media (max-width: 640px) { .wrap { padding: 0 20px; } }
 
   /* ── nav ─────────────────────────────────────────────────────────────── */
-  nav { border-bottom: 1px solid var(--line); position: sticky; top: 0; background: rgba(0,0,0,.85); backdrop-filter: blur(12px); z-index: 10; }
-  .nav-in { display: flex; align-items: center; gap: 14px; height: 62px; }
+  nav { border-bottom: 1px solid var(--line); position: sticky; top: 0; background: rgba(0,0,0,.85); backdrop-filter: blur(12px); z-index: 30; }
+  .nav-in { display: flex; align-items: center; gap: 14px; height: 64px; }
   .logo { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight: 600; letter-spacing: -.01em; text-decoration: none; }
-  .logo .mk {
-    width: 26px; height: 26px; border-radius: 7px; background: #fff; color: #000;
-    display: grid; place-items: center; font: 700 12px/1 ui-monospace, Menlo, monospace;
+  .logo img { width: 30px; height: 30px; border-radius: 8px; display: block; }
+  .nav-links { margin-left: auto; display: flex; align-items: center; gap: 26px; font-size: 14.5px; }
+  .nav-links a, .nav-links button {
+    color: var(--muted); text-decoration: none; background: none; border: 0;
+    font: inherit; cursor: pointer; padding: 0;
   }
-  .nav-links { margin-left: auto; display: flex; gap: 26px; font-size: 14.5px; }
-  .nav-links a { color: var(--muted); text-decoration: none; }
-  .nav-links a:hover { color: var(--fg); }
-  @media (max-width: 720px) { .nav-links { display: none; } }
+  .nav-links a:hover, .nav-links button:hover { color: var(--fg); }
+  @media (max-width: 720px) { .nav-links a:not(.keep) { display: none; } }
 
-  /* ── split rows ──────────────────────────────────────────────────────── */
-  .row {
-    display: grid; grid-template-columns: 1fr 1fr; gap: 64px; align-items: center;
-    padding: 92px 0;
+  /* contact popover */
+  .pop-host { position: relative; }
+  .pop {
+    position: absolute; right: 0; top: calc(100% + 14px);
+    background: #0e0e11; border: 1px solid #26262c; border-radius: 16px;
+    padding: 14px; width: 208px; box-shadow: 0 24px 60px rgba(0,0,0,.6);
   }
-  .row + .row { border-top: 1px solid var(--line); }
+  .pop[hidden] { display: none; }
+  .pop img { display: block; width: 180px; height: 180px; border-radius: 10px; background: #fff; }
+  .pop p { margin: 10px 0 0; text-align: center; font-size: 12.5px; color: #6f6f76; }
+
+  /* ── rows ────────────────────────────────────────────────────────────── */
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 64px; align-items: center; padding: 88px 0; }
+  .row + .row, .feat { border-top: 1px solid var(--line); }
   @media (max-width: 900px) {
-    .row { grid-template-columns: 1fr; gap: 40px; padding: 60px 0; }
+    .row { grid-template-columns: 1fr; gap: 38px; padding: 56px 0; }
     .row .visual { order: -1; }
   }
 
-  h1, h2 {
-    margin: 0 0 22px;
-    font-weight: 600;
-    letter-spacing: -.035em;
-    line-height: 1.04;
-  }
-  h1 { font-size: clamp(42px, 6.4vw, 74px); }
-  h2 { font-size: clamp(34px, 5vw, 60px); }
-  .lede { margin: 0 0 16px; color: var(--muted); font-size: 17px; max-width: 46ch; }
+  h1, h2 { margin: 0 0 22px; font-weight: 600; letter-spacing: -.035em; line-height: 1.05; }
+  h1 { font-size: clamp(40px, 6.2vw, 72px); }
+  h2 { font-size: clamp(32px, 4.8vw, 56px); }
+  .lede { margin: 0 0 14px; color: var(--muted); font-size: 17px; max-width: 46ch; }
   .lede.small { font-size: 15.5px; }
+  .tag {
+    display: inline-block; margin: 0 0 18px; padding: 5px 13px; border-radius: 999px;
+    background: rgba(77,107,254,.14); border: 1px solid rgba(77,107,254,.35);
+    color: #9db0ff; font-size: 12.5px; font-weight: 500;
+  }
 
-  /* ── buttons ─────────────────────────────────────────────────────────── */
-  .btns { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 30px; }
+  .btns { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 28px; }
   .btn {
     display: inline-flex; align-items: center; justify-content: center;
     padding: 13px 28px; border-radius: 999px;
@@ -80,42 +87,67 @@
   .btn[aria-disabled="true"] { background: #141414; color: var(--muted); border-color: var(--line); pointer-events: none; }
   .sub { margin: 18px 0 0; color: #6f6f76; font-size: 13.5px; }
   .sub b { color: var(--muted); font-weight: 500; }
-  .textlink { display: inline-flex; align-items: center; gap: 6px; margin-top: 20px; color: var(--muted); font-size: 14.5px; text-decoration: none; }
+  .textlink { display: inline-flex; align-items: center; gap: 6px; margin-top: 18px; color: var(--muted); font-size: 14.5px; text-decoration: none; }
   .textlink:hover { color: var(--fg); }
 
   /* ── visuals ─────────────────────────────────────────────────────────── */
   .shot {
-    border-radius: 18px; overflow: hidden; border: 1px solid var(--line);
-    background: linear-gradient(150deg, #1a1f3a 0%, #2a2150 48%, #14172b 100%);
-    aspect-ratio: 4 / 3; display: grid; place-items: center; padding: 26px;
+    border-radius: 18px; border: 1px solid var(--line); overflow: hidden;
+    background: linear-gradient(150deg, #131a33 0%, #1d2350 50%, #0f1226 100%);
+    aspect-ratio: 4 / 3; display: grid; place-items: center; padding: 24px;
   }
-  .term {
-    width: 100%; max-width: 440px; background: #0b0b0d; border: 1px solid #24242a;
-    border-radius: 12px; overflow: hidden; box-shadow: 0 22px 60px rgba(0,0,0,.55);
+  .shot.green { background: linear-gradient(150deg, #0f1a2e 0%, #16243f 52%, #0c1220 100%); }
+
+  /* desktop app window mock */
+  .app {
+    width: 100%; background: #0b0b0d; border: 1px solid #24242a; border-radius: 12px;
+    overflow: hidden; box-shadow: 0 24px 64px rgba(0,0,0,.6);
   }
-  .term-bar { display: flex; align-items: center; gap: 6px; padding: 10px 12px; border-bottom: 1px solid #1c1c22; }
-  .dot { width: 10px; height: 10px; border-radius: 50%; }
-  .term-tabs { margin-left: 10px; display: flex; gap: 6px; font-size: 10.5px; color: #6f6f76; }
-  .term-tabs span { padding: 3px 9px; border-radius: 6px; }
-  .term-tabs .on { background: #1d1d24; color: #e6e6ea; }
-  .term-body { padding: 14px 15px; font: 12px/1.85 ui-monospace, SFMono-Regular, Menlo, monospace; }
-  .term-body .p { color: #4d9ffe; }
-  .term-body .c { color: #e6e6ea; }
-  .term-body .o { color: #6f6f76; }
-  .term-body .g { color: #3fb950; }
-  .cursor { display: inline-block; width: 7px; height: 13px; background: #4d9ffe; vertical-align: -2px; animation: blink 1.15s steps(2) infinite; }
+  .titlebar { display: flex; align-items: center; gap: 6px; padding: 9px 12px; background: #101014; border-bottom: 1px solid #1c1c22; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  .titlebar .title { margin-left: 8px; font-size: 11px; color: #6f6f76; }
+  .app-body { display: grid; grid-template-columns: 88px 1fr 132px; min-height: 190px; }
+  @media (max-width: 460px) { .app-body { grid-template-columns: 0 1fr 108px; } }
+
+  .side { background: #0e0e12; border-right: 1px solid #1c1c22; padding: 10px 8px; overflow: hidden; }
+  .side-new { font-size: 9.5px; color: #9db0ff; background: rgba(77,107,254,.12); border-radius: 6px; padding: 5px 7px; margin-bottom: 8px; }
+  .side-item { font-size: 9.5px; color: #6f6f76; padding: 5px 7px; border-radius: 6px; margin-bottom: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .side-item.on { background: #1a1a20; color: #d8d8de; }
+
+  .chat { padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+  .bubble { border-radius: 10px; padding: 7px 10px; font-size: 10.5px; line-height: 1.5; max-width: 88%; }
+  .bubble.user { align-self: flex-end; background: var(--brand); color: #fff; }
+  .bubble.ai { background: #16161c; color: #c9c9d1; align-self: flex-start; width: 84%; }
+  .ai-l { display: block; height: 6px; border-radius: 3px; background: #2b2b34; margin: 5px 0; }
+  .ai-l.s { width: 72%; } .ai-l.m { width: 54%; }
+  .composer { margin-top: auto; border: 1px solid #24242c; border-radius: 9px; padding: 7px 10px; font-size: 10px; color: #4d4d57; }
+
+  .panel { background: #0e0e12; border-left: 1px solid #1c1c22; display: flex; flex-direction: column; }
+  .ptabs { display: flex; gap: 3px; padding: 7px 6px; border-bottom: 1px solid #1c1c22; }
+  .pt { font-size: 8.5px; color: #5c5c66; padding: 3px 6px; border-radius: 5px; }
+  .pt.on { background: #1d1d24; color: #e6e6ea; }
+  .pbody { padding: 9px 10px; font: 8.5px/1.75 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .pbody .p { color: #4d9ffe; } .pbody .o { color: #6f6f76; } .pbody .g { color: #3fb950; }
+  .cursor { display: inline-block; width: 5px; height: 9px; background: #4d9ffe; vertical-align: -1px; animation: blink 1.15s steps(2) infinite; }
   @keyframes blink { 50% { opacity: 0; } }
 
-  .qr-wrap { display: flex; gap: 22px; align-items: flex-start; margin-top: 30px; flex-wrap: wrap; }
-  .qr {
-    width: 168px; padding: 12px; background: #fff; border-radius: 14px;
-  }
-  .qr img { display: block; width: 100%; height: auto; border-radius: 4px; }
-  .qr-cap { margin: 10px 0 0; color: #6f6f76; font-size: 12.5px; text-align: center; }
+  /* import panel mock */
+  .imp { width: 100%; background: #0b0b0d; border: 1px solid #24242a; border-radius: 12px; overflow: hidden; box-shadow: 0 24px 64px rgba(0,0,0,.6); }
+  .imp-head { padding: 11px 13px; border-bottom: 1px solid #1c1c22; font-size: 11px; color: #d8d8de; }
+  .imp-list { padding: 9px; display: flex; flex-direction: column; gap: 6px; }
+  .imp-row { display: flex; align-items: center; gap: 8px; padding: 8px 9px; border: 1px solid #1e1e25; border-radius: 8px; background: #101014; }
+  .imp-row.on { border-color: rgba(77,107,254,.5); background: rgba(77,107,254,.09); }
+  .chip { font-size: 8px; padding: 2px 6px; border-radius: 999px; flex: none; }
+  .chip.cc { background: rgba(217,119,87,.18); color: #e0a184; }
+  .chip.cx { background: rgba(130,130,140,.2); color: #b9b9c2; }
+  .chip.pi { background: rgba(63,185,80,.16); color: #77d68a; }
+  .imp-t { font-size: 9.5px; color: #c9c9d1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .imp-d { margin-left: auto; font-size: 8.5px; color: #55555f; flex: none; }
+  .imp-go { margin: 3px 9px 11px; text-align: center; font-size: 9.5px; color: #fff; background: var(--brand); border-radius: 7px; padding: 7px; }
 
   /* ── features ────────────────────────────────────────────────────────── */
-  .feat { padding: 84px 0; border-top: 1px solid var(--line); }
-  .feat h3 { margin: 0 0 40px; font-size: 13px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: #6f6f76; }
+  .feat { padding: 82px 0 92px; }
+  .feat h3 { margin: 0 0 36px; font-size: 13px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: #6f6f76; }
   .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
   @media (max-width: 900px) { .grid { grid-template-columns: repeat(2, 1fr); } }
   @media (max-width: 560px) { .grid { grid-template-columns: 1fr; } }
@@ -123,21 +155,7 @@
   .cell h4 { margin: 0 0 8px; font-size: 15.5px; font-weight: 600; }
   .cell p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.6; }
 
-  .steps { padding: 84px 0; border-top: 1px solid var(--line); }
-  .steps ol { margin: 0; padding: 0; list-style: none; counter-reset: s; display: grid; gap: 20px; max-width: 720px; }
-  .steps li { counter-increment: s; display: grid; grid-template-columns: 30px 1fr; gap: 16px; color: var(--muted); font-size: 15.5px; }
-  .steps li::before {
-    content: counter(s); width: 30px; height: 30px; border-radius: 50%;
-    border: 1px solid #2e2e2e; display: grid; place-items: center;
-    font-size: 12.5px; color: var(--fg);
-  }
-  .steps b { color: var(--fg); font-weight: 500; }
-  code {
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px;
-    background: #141418; border: 1px solid #26262c; border-radius: 6px; padding: 2px 7px;
-  }
-
-  footer { border-top: 1px solid var(--line); padding: 34px 0 60px; color: #6f6f76; font-size: 13.5px; }
+  footer { border-top: 1px solid var(--line); padding: 32px 0 58px; color: #6f6f76; font-size: 13.5px; }
   .foot-in { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
   footer a { text-decoration: none; }
   footer a:hover { color: var(--fg); }
@@ -147,12 +165,18 @@
 
 <nav>
   <div class="wrap nav-in">
-    <a class="logo" href="/"><span class="mk">&gt;_</span> Dsh GUI</a>
+    <a class="logo" href="/"><img src="assets/logo.png" alt=""> Dsh GUI</a>
     <div class="nav-links">
+      <a href="#import">会话导入</a>
       <a href="#features">功能</a>
-      <a href="#install">安装</a>
-      <a href="#contact">交流</a>
-      <a href="https://github.com/Caxson/dsh-gui">GitHub</a>
+      <div class="pop-host">
+        <button id="contact-btn" class="keep" aria-expanded="false">交流</button>
+        <div class="pop" id="contact-pop" hidden>
+          <img src="assets/wechat-qr.png" alt="微信二维码" width="180" height="180">
+          <p>微信扫码</p>
+        </div>
+      </div>
+      <a class="keep" href="https://github.com/Caxson/dsh-gui">GitHub</a>
     </div>
   </div>
 </nav>
@@ -164,7 +188,7 @@
       <h1>下载桌面<br>版 Dsh GUI</h1>
       <p class="lede">
         把 DeepSeek Harness 引擎装进一个 macOS 应用：多标签终端、内置浏览器、
-        插件市场，以及从 Claude Code、Codex、pi 迁移历史会话的能力。
+        插件市场，以及把别的 agent 的历史会话直接接过来继续干。
       </p>
       <p class="lede small">开源、本地运行，引擎只监听 127.0.0.1。</p>
 
@@ -178,45 +202,80 @@
 
     <div class="visual">
       <div class="shot">
-        <div class="term" aria-hidden="true">
-          <div class="term-bar">
+        <div class="app" aria-hidden="true">
+          <div class="titlebar">
             <span class="dot" style="background:#ff5f57"></span>
             <span class="dot" style="background:#febc2e"></span>
             <span class="dot" style="background:#28c840"></span>
-            <span class="term-tabs">
-              <span class="on">❯_ 终端</span><span>◐ 浏览器</span><span>💬 侧边聊天</span>
-            </span>
+            <span class="title">Dsh GUI</span>
           </div>
-          <div class="term-body">
-            <div><span class="p">❯</span> <span class="c">dsh</span> <span class="o">重构右侧面板为标签页</span></div>
-            <div class="o">&nbsp;</div>
-            <div class="o">读取 src/panel/panel.js …</div>
-            <div class="o">读取 src/panel/panes.js …</div>
-            <div><span class="g">✓</span> <span class="o">已改 4 个文件，smoke 通过</span></div>
-            <div class="o">&nbsp;</div>
-            <div><span class="p">❯</span> <span class="cursor"></span></div>
+          <div class="app-body">
+            <aside class="side">
+              <div class="side-new">＋ 新会话</div>
+              <div class="side-item on">重构右侧面板</div>
+              <div class="side-item">插件市场筛选</div>
+              <div class="side-item">导入 Codex 会话</div>
+            </aside>
+            <section class="chat">
+              <div class="bubble user">把右侧面板改成标签页</div>
+              <div class="bubble ai">
+                改好了，终端／浏览器／文件各占一个标签。
+                <span class="ai-l"></span><span class="ai-l s"></span>
+              </div>
+              <div class="composer">问点什么…</div>
+            </section>
+            <aside class="panel">
+              <div class="ptabs"><span class="pt on">终端</span><span class="pt">浏览器</span><span class="pt">文件</span></div>
+              <div class="pbody">
+                <div><span class="p">❯</span> <span class="o">npm run smoke</span></div>
+                <div class="o">engine ready</div>
+                <div><span class="g">✓</span> <span class="o">ptyProbe ok</span></div>
+                <div><span class="p">❯</span> <span class="cursor"></span></div>
+              </div>
+            </aside>
           </div>
         </div>
       </div>
     </div>
   </section>
 
-  <section class="row" id="contact">
+  <section class="row" id="import">
+    <div>
+      <span class="tag">跨 agent 会话导入</span>
+      <h2>换个工具，<br>不用从头讲起</h2>
+      <p class="lede">
+        Dsh GUI 会自动扫描本机 <b>Claude Code</b>、<b>Codex</b>、<b>pi</b> 留下的历史会话，
+        挑一条，它就把整段对话压缩成接续简报，在原来的工作目录里开一个新会话继续干。
+      </p>
+      <p class="lede small">
+        简报里还附着原始记录的路径——缺细节时它会自己回去翻原文，而不是问你重说一遍。
+      </p>
+      <a class="textlink" href="https://github.com/Caxson/dsh-gui#readme">了解它是怎么做的 ›</a>
+    </div>
     <div class="visual">
-      <div class="shot" style="background:linear-gradient(150deg,#101a14 0%,#132b1c 50%,#0c1410 100%)">
-        <div class="qr">
-          <img src="assets/wechat-qr.png" alt="微信二维码" width="300" height="300" loading="lazy">
+      <div class="shot green">
+        <div class="imp" aria-hidden="true">
+          <div class="imp-head">⤵ 导入会话</div>
+          <div class="imp-list">
+            <div class="imp-row on">
+              <span class="chip cc">claude</span>
+              <span class="imp-t">重构右侧面板为标签页</span>
+              <span class="imp-d">今天</span>
+            </div>
+            <div class="imp-row">
+              <span class="chip cx">codex</span>
+              <span class="imp-t">修复更新源回退逻辑</span>
+              <span class="imp-d">昨天</span>
+            </div>
+            <div class="imp-row">
+              <span class="chip pi">pi</span>
+              <span class="imp-t">插件市场信任分层</span>
+              <span class="imp-d">3 天前</span>
+            </div>
+          </div>
+          <div class="imp-go">压缩并接续</div>
         </div>
       </div>
-    </div>
-    <div>
-      <h2>一起把它<br>用起来</h2>
-      <p class="lede">
-        用下来有问题、想要什么功能、插件写不通，扫码加我微信直接说。
-        Bug 与需求也可以直接开 GitHub Issue。
-      </p>
-      <p class="sub" style="margin-top:26px">扫描二维码添加微信</p>
-      <a class="textlink" href="https://github.com/Caxson/dsh-gui/issues">提交 Issue ›</a>
     </div>
   </section>
 
@@ -232,28 +291,14 @@
         <p>搜索安装 DSH 生态插件，带中文描述、分类与可安装性标注。</p>
       </div>
       <div class="cell">
-        <h4>跨工具会话导入</h4>
-        <p>把 Claude Code、Codex、pi 的历史会话压缩成简报，在 DSH 里接着干。</p>
+        <h4>跨 agent 会话导入</h4>
+        <p>Claude Code、Codex、pi 的历史会话一键接续，工作目录与上下文都带过来。</p>
       </div>
       <div class="cell">
         <h4>自动更新</h4>
         <p>国内 CDN 分发增量更新包，新版本自动下载，重启即完成。</p>
       </div>
     </div>
-  </section>
-
-  <section class="steps" id="install">
-    <h3 style="margin:0 0 40px;font-size:13px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:#6f6f76">安装</h3>
-    <ol>
-      <li><span>下载对应芯片的 <code>.dmg</code>，双击打开</span></li>
-      <li><span>把 <b>Dsh GUI</b> 拖进「应用程序」</span></li>
-      <li><span>首次打开时 macOS 会确认一次「来自互联网的 App」，点<b>打开</b></span></li>
-      <li><span>进入 <b>设置 → 模型</b>，填入 DeepSeek（或任意 OpenAI 兼容）API Key</span></li>
-    </ol>
-    <p class="sub" style="margin-top:26px;max-width:720px">
-      需要 macOS 11 及以上。机器上已有 <code>~/.dsh</code>（用过 dsh CLI 或 <code>dsh web</code>）会直接复用，
-      会话与命令行侧完全同步。
-    </p>
   </section>
 
 </main>
@@ -272,6 +317,20 @@
 <script>
 (function () {
   'use strict';
+  // ── contact popover ─────────────────────────────────────────────────────
+  var cBtn = document.getElementById('contact-btn');
+  var cPop = document.getElementById('contact-pop');
+  function closePop() { cPop.hidden = true; cBtn.setAttribute('aria-expanded', 'false'); }
+  cBtn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    cPop.hidden = !cPop.hidden;
+    cBtn.setAttribute('aria-expanded', String(!cPop.hidden));
+  });
+  document.addEventListener('click', closePop);
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closePop(); });
+  cPop.addEventListener('click', function (e) { e.stopPropagation(); });
+
+  // ── download links ──────────────────────────────────────────────────────
   // Artifacts and the update feed live on the same CDN prefix. Reading
   // latest-mac.yml at load time means a new release is live here the moment it
   // is mirrored — the page never needs redeploying.
@@ -280,10 +339,8 @@
   var RELEASES = 'https://github.com/Caxson/dsh-gui/releases';
 
   // Baked at deploy time from the release's own latest-mac.yml (see
-  // scripts/build-site.mjs). The page is fully functional from this alone —
-  // the live fetch below is a progressive enhancement that lets an
-  // already-deployed page pick up a newer release, and is expected to fail
-  // when the page and the artifacts are not same-origin (CORS).
+  // scripts/build-site.mjs), so the page works with no network beyond this
+  // document; the live fetch below only upgrades an already-deployed page.
   var BAKED = /*__FEED__*/null/*__FEED__*/;
 
   var primary = document.getElementById('primary');
@@ -302,8 +359,7 @@
       var r = ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : '';
       if (/Apple\s*M\d/i.test(r) || /Apple GPU/i.test(r)) return true;
     } catch (e) { /* WebGL blocked — fall through */ }
-    // Fallback signal only: Apple Silicon Macs report far more logical cores
-    // than the old dual-core Intel Airs. Never authoritative.
+    // Fallback signal only, never authoritative.
     return navigator.hardwareConcurrency >= 8 ? true : null;
   }
 
@@ -366,18 +422,13 @@
   }
 
   function safeRender(feed) {
-    try {
-      return feed && feed.files && feed.files.length ? render(feed) : false;
-    } catch (e) { return false; }
+    try { return feed && feed.files && feed.files.length ? render(feed) : false; }
+    catch (e) { return false; }
   }
 
-  // 1) Render immediately from the baked feed so the page is useful even with
-  //    no network beyond this document.
   var rendered = safeRender(BAKED);
   if (!rendered) degrade('正在获取版本信息…');
 
-  // 2) Then try the live feed; only replace the UI if it actually parses. A
-  //    CORS/offline failure leaves the baked render untouched.
   fetch(FEED, { cache: 'no-store' })
     .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
     .then(function (text) { safeRender(parseFeed(text)); })
