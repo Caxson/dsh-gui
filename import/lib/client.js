@@ -139,10 +139,19 @@ window.__ModuleLoader__.load({
         String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0')
     }
 
-    function continuationPrompt(source, summary) {
+    function continuationPrompt(source, summary, transcriptPath) {
+      // The brief is a lossy compression of a much longer transcript. Hand the
+      // agent the original file path as an index so it can go read the raw
+      // record itself when it needs a detail the brief dropped (an exact error
+      // string, a command that was run, the wording of a decision) instead of
+      // guessing or asking the user to repeat it.
+      var index = transcriptPath
+        ? '\n\n---\n\n原始会话记录（简报是它的有损压缩）：`' + transcriptPath + '`\n' +
+          '简报里缺少的细节——具体报错、跑过的命令、某个决定的原话——直接读这个文件检索，不要凭空猜测。'
+        : ''
       return '我把一段在 ' + (SOURCE_LABEL[source] || source) + ' 里进行的历史会话迁移了过来。' +
         '下面是它的接续简报，请通读后直接接着干活：优先处理「未完成事项与下一步」，' +
-        '遵守简报里的约定与偏好，不要重做已完成的工作。\n\n---\n\n' + summary
+        '遵守简报里的约定与偏好，不要重做已完成的工作。\n\n---\n\n' + summary + index
     }
 
     async function runImport(ctx, row, preset, setPhase) {
@@ -176,7 +185,7 @@ window.__ModuleLoader__.load({
 
       var binding = ctx.sessions.binding(sessionId)
       var sent = await binding.session.prompt(
-        [{ type: 'text', text: continuationPrompt(row.source, data.summary) }],
+        [{ type: 'text', text: continuationPrompt(row.source, data.summary, data.path || row.path) }],
         'queue',
       )
       if (!sent.ok) throw new Error(sent.error.code + ': ' + sent.error.message)

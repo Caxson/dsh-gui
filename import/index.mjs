@@ -392,7 +392,10 @@ export function apply(ctx) {
             req.on('close', () => abort.abort())
             try {
               const summary = await summarize(path, abort.signal)
-              sendJson(res, 200, { summary, cwd: detectCwd(path) })
+              // `path` goes back to the client so the continuation brief can
+              // cite the original transcript as a lookup index — the brief is
+              // lossy, the file on disk is not.
+              sendJson(res, 200, { summary, cwd: detectCwd(path), path })
             } catch (err) {
               sendJson(res, 500, { error: err.message })
             }

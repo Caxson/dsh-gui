@@ -1,0 +1,136 @@
+# Follow upstream engine releases end to end, without a human in the loop.
+#
+#   Dependabot opens a grouped @deepseek-ai/* PR (daily)
+#     → smoke + closure gates run on it like any PR
+#     → this workflow auto-merges it once those gates are green
+#     → then bumps the patch version and pushes a tag
+#     → release.yml builds both architectures and publishes
+#     → the app's auto-updater picks it up
+#
+# The gates are what make this safe: the closure check refuses an incoherent
+# runtime family, and smoke boots the real engine and drives the panel. If
+# either fails the PR simply stays open for a human.
+name: engine-autorelease
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+  # A green run alone does not merge — check_suite tells us the gates finished.
+  check_suite:
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: 'Engine-sync PR number to evaluate'
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+
+jobs:
+  autorelease:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Find the candidate engine-sync PR
+        id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          PR_INPUT: ${{ inputs.pr }}
+          PR_EVENT: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            pr="$PR_INPUT"
+          elif [ -n "${PR_EVENT:-}" ]; then
+            pr="$PR_EVENT"
+          else
+            # check_suite: pick the newest open engine-sync PR by dependabot.
+            pr=$(gh pr list --repo "$REPO" --state open --label engine-sync \
+                   --author "app/dependabot" --limit 1 --json number \
+                   --jq '.[0].number // empty')
+          fi
+          if [ -z "${pr:-}" ]; then
+            echo "no engine-sync PR to act on"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Only ever touch Dependabot's own grouped engine PRs.
+          meta=$(gh pr view "$pr" --repo "$REPO" \
+                   --json number,author,labels,state,isDraft,mergeable)
+          author=$(echo "$meta" | jq -r '.author.login')
+          labels=$(echo "$meta" | jq -r '[.labels[].name] | join(",")')
+          state=$(echo "$meta" | jq -r '.state')
+          draft=$(echo "$meta" | jq -r '.isDraft')
+          if [ "$author" != "dependabot[bot]" ] || [ "$state" != "OPEN" ] \
+             || [ "$draft" != "false" ] || [[ ",$labels," != *",engine-sync,"* ]]; then
+            echo "PR #$pr is not an open dependabot engine-sync PR (author=$author, labels=$labels, state=$state, draft=$draft)"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "pr=$pr" >> "$GITHUB_OUTPUT"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for the required gates to pass
+        id: gates
+        if: steps.find.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ steps.find.outputs.pr }}
+        run: |
+          set -euo pipefail
+          # Poll rather than trust a single event: the smoke job boots a real
+          # engine on a macOS runner and takes a while to report.
+          for i in $(seq 1 60); do
+            checks=$(gh pr checks "$PR" --repo "$REPO" --json name,state 2>/dev/null || echo '[]')
+            total=$(echo "$checks" | jq 'length')
+            if [ "$total" -eq 0 ]; then sleep 30; continue; fi
+            pending=$(echo "$checks" | jq '[.[] | select(.state == "PENDING" or .state == "QUEUED" or .state == "IN_PROGRESS")] | length')
+            failed=$(echo "$checks" | jq '[.[] | select(.state == "FAILURE" or .state == "ERROR" or .state == "CANCELLED" or .state == "TIMED_OUT")] | length')
+            if [ "$failed" -gt 0 ]; then
+              echo "gates failed — leaving PR #$PR open for a human:"
+              echo "$checks" | jq -r '.[] | select(.state != "SUCCESS" and .state != "SKIPPED") | "  \(.name): \(.state)"'
+              echo "ok=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            if [ "$pending" -eq 0 ]; then
+              echo "all $total checks green"
+              echo "ok=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            sleep 30
+          done
+          echo "gates still pending after 30m — leaving PR #$PR open"
+          echo "ok=false" >> "$GITHUB_OUTPUT"
+
+      - name: Merge, bump the patch version, and tag
+        if: steps.find.outputs.skip == 'false' && steps.gates.outputs.ok == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ steps.find.outputs.pr }}
+        run: |
+          set -euo pipefail
+          gh pr merge "$PR" --repo "$REPO" --squash --delete-branch
+
+          git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" repo
+          cd repo
+          git config user.name "Caxson"
+          git config user.email "101972681+Caxson@users.noreply.github.com"
+
+          engine=$(node -p "require('./package.json').dependencies['@deepseek-ai/dsh']")
+          version=$(npm version patch --no-git-tag-version | tr -d 'v')
+
+          # The gates ran on the PR head; re-run the cheap one on the merged
+          # tree so a bad merge cannot reach a tag.
+          npm run verify:closure
+
+          git commit -aqm "chore: release ${version} (engine ${engine})"
+          git tag "v${version}"
+          git push origin HEAD:main
+          git push origin "v${version}"
+          echo "tagged v${version} — release.yml will build and publish it"

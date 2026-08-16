@@ -30,23 +30,24 @@ npmRebuild: false
 mac:
   category: public.app-category.developer-tools
   icon: build/icon.icns
-  # Signed + notarized distribution. Requires a "Developer ID Application"
-  # certificate in the login keychain and APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD /
-  # APPLE_TEAM_ID in the environment. Until those exist, build with
-  # `npm run dist:unsigned`.
+  # Signed + notarized distribution. Locally, electron-builder picks up the
+  # "Developer ID Application" certificate from the login keychain; in CI, the
+  # release workflow feeds it CSC_LINK (base64 p12) + APPLE_ID /
+  # APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID from repo secrets. Without a
+  # certificate the build degrades to unsigned (`npm run dist:unsigned`).
   hardenedRuntime: true
   gatekeeperAssess: false
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
   notarize: true
+  # Architecture comes from the CLI (`--arm64` / `--x64`). The app bundles a
+  # Chromium build for the browser pane and Chromium is architecture-specific,
+  # so each arch is built on a runner of that architecture and the resulting
+  # feeds are merged (scripts/merge-mac-feed.mjs).
   target:
     - target: dmg
-      arch:
-        - arm64
     # The zip + latest-mac.yml are what the app's built-in auto-updater uses.
     - target: zip
-      arch:
-        - arm64
 
 # Self-update feed: GitHub Releases is the canonical channel (electron-builder
 # embeds it into app-update.yml and generates latest-mac.yml next to the zip).

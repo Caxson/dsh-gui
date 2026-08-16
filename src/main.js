@@ -38,11 +38,17 @@ const SMOKE = process.env.DSH_GUI_SMOKE === '1';
 const BOOT_TIMEOUT_MS = 120_000;
 
 // ── auto-update ───────────────────────────────────────────────────────────
-// Canonical channel: GitHub Releases (electron-builder embeds the feed into
-// app-update.yml at build time; no runtime config needed). Mainland-China
-// users can point DSH_GUI_UPDATE_URL at a generic static mirror (Aliyun OSS)
-// hosting the same dmg/zip/latest-mac.yml artifacts.
-const UPDATE_URL_OVERRIDE = (process.env.DSH_GUI_UPDATE_URL || '').trim();
+// Artifacts are published to GitHub Releases and mirrored to a static CDN that
+// serves the same dmg/zip/blockmap/latest-mac.yml. The mirror is the default
+// update feed: most users are in mainland China, where pulling a ~440MB delta
+// from GitHub is slow and often fails outright. Set DSH_GUI_UPDATE_URL to
+// override (use "github" to fall back to the embedded GitHub feed).
+const UPDATE_MIRROR_URL = 'https://merefusion-static.oss-cn-hangzhou.aliyuncs.com/dsh-gui/';
+const UPDATE_URL_RAW = (process.env.DSH_GUI_UPDATE_URL || '').trim();
+// Empty → mirror (default). "github" → embedded GitHub feed. Anything else →
+// that URL, so a self-hosted mirror stays one env var away.
+const UPDATE_URL_OVERRIDE =
+  UPDATE_URL_RAW.toLowerCase() === 'github' ? '' : UPDATE_URL_RAW || UPDATE_MIRROR_URL;
 const UPDATE_DOWNLOAD_PAGE =
   process.env.DSH_GUI_DOWNLOAD_PAGE ||
   'https://github.com/Caxson/dsh-gui/releases/latest';

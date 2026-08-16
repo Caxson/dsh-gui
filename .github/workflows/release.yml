@@ -1,5 +1,11 @@
-# Build the unsigned macOS app on a GitHub runner and attach the artifacts to
-# a Release — publishing never depends on the maintainer's local uplink.
+# Build the macOS app for both architectures on GitHub runners and attach the
+# artifacts to a Release — publishing never depends on the maintainer's local
+# uplink.
+#
+# The app bundles a Chromium build for the browser pane, and Chromium is
+# architecture-specific, so each arch is built on a runner of that architecture
+# (macos-14 = Apple Silicon, macos-13 = Intel) and the two update feeds are
+# merged into one that serves both.
 #
 # Trigger: push a tag like v1.2.0, or run manually with a tag input.
 name: release
@@ -11,15 +17,23 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag (e.g. v1.1.0); must already exist or will be created at this ref'
+        description: 'Release tag (e.g. v1.3.0); must already exist or will be created at this ref'
         required: true
 
 permissions:
   contents: write
 
 jobs:
-  build-and-upload:
-    runs-on: macos-14
+  build:
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - runner: macos-14
+            arch: arm64
+          - runner: macos-13
+            arch: x64
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
 
@@ -28,25 +42,129 @@ jobs:
           node-version: 22
           cache: npm
 
-      - name: Verify engine dependency closure
-        # No release ships on an incoherent runtime family — fail before build.
-        run: npm run verify:closure
+      - name: Verify engine dependency closure + docs consistency
+        # No release ships on an incoherent runtime family or a doc that has
+        # drifted from the code — fail before build.
+        run: |
+          npm run verify:closure
+          npm run verify:docs
 
       - name: Install dependencies
         run: npm ci
 
       - name: Bundle Chromium for the browser plugin
+        # Installs the runner's native Chromium, which is exactly the arch this
+        # job packages.
         run: PLAYWRIGHT_BROWSERS_PATH=resources/browsers npx playwright install chromium
 
-      - name: Build dmg + zip (unsigned)
-        run: CSC_IDENTITY_AUTO_DISCOVERY=false npx electron-builder --mac -c.mac.notarize=false --publish never
+      - name: Build dmg + zip (signed + notarized when secrets present)
+        # With CSC_LINK (base64 Developer ID p12) + Apple notarization secrets
+        # set on the repo, electron-builder signs and notarizes; without them
+        # the workflow degrades to an unsigned build. `--publish never` — the
+        # publish job owns the upload.
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          if [ -n "$CSC_LINK" ]; then
+            npx electron-builder --mac --$ARCH --publish never
+          else
+            CSC_IDENTITY_AUTO_DISCOVERY=false npx electron-builder --mac --$ARCH -c.mac.notarize=false --publish never
+          fi
+
+      - name: Stage artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p staged
+          cp dist/*.dmg dist/*.zip dist/*.blockmap dist/latest-mac.yml staged/ 2>/dev/null || true
+          ls -la staged
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-${{ matrix.arch }}
+          path: staged/
+          retention-days: 3
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      # `secrets` is not dependable inside a step-level `if`; surface the one
+      # bit we need as a job-level env value instead.
+      HAS_MIRROR: ${{ secrets.OSS_KEY_ID != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: incoming
+
+      - name: Merge per-arch update feeds
+        # One feed listing both architectures; electron-updater picks the right
+        # file by arch (and handles Rosetta) at update time.
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          # Every artifact except the per-arch feeds, which are merged below
+          # into a single out/latest-mac.yml rather than clobbering each other.
+          for d in incoming/mac-*; do
+            for f in "$d"/*; do
+              [ "$(basename "$f")" = "latest-mac.yml" ] && continue
+              cp "$f" out/
+            done
+          done
+          node scripts/merge-mac-feed.mjs out/latest-mac.yml incoming/mac-*/latest-mac.yml
+          cat out/latest-mac.yml
+          ls -la out
+
+      - name: Build the download page
+        run: node scripts/build-site.mjs out/latest-mac.yml dist-site/index.html
 
       - name: Upload artifacts to the Release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
         run: |
+          set -euo pipefail
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
             || gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Dsh GUI $TAG" --generate-notes
-          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber \
-            dist/*.dmg dist/*.zip dist/*.blockmap dist/latest-mac.yml
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber out/*
+
+      # The mirror is the app's default update feed and backs the download page,
+      # so it must never lag a Release. electron-builder writes dot-named files
+      # while latest-mac.yml references dash-named URLs — upload under the
+      # dashed name so the feed resolves.
+      - name: Mirror artifacts and page to the CDN
+        # Skipped silently when mirror credentials are absent (e.g. on forks).
+        if: env.HAS_MIRROR == 'true'
+        env:
+          OSS_KEY_ID: ${{ secrets.OSS_KEY_ID }}
+          OSS_KEY_SECRET: ${{ secrets.OSS_KEY_SECRET }}
+          OSS_ENDPOINT: oss-cn-hangzhou.aliyuncs.com
+          OSS_BUCKET: merefusion-static
+          OSS_PREFIX: dsh-gui
+        run: |
+          set -euo pipefail
+          curl -fsSL -o ossutil.zip https://gosspublic.alicdn.com/ossutil/v2/2.1.1/ossutil-2.1.1-linux-amd64.zip
+          unzip -q -j ossutil.zip -d ossutil-bin
+          chmod +x ossutil-bin/ossutil
+          put() {
+            ossutil-bin/ossutil cp -f "$1" "oss://$OSS_BUCKET/$OSS_PREFIX/$2" \
+              --endpoint "$OSS_ENDPOINT" \
+              --access-key-id "$OSS_KEY_ID" \
+              --access-key-secret "$OSS_KEY_SECRET"
+          }
+          for f in out/*; do
+            base=$(basename "$f")
+            put "$f" "$(echo "$base" | sed 's/^Dsh\.GUI/Dsh-GUI/')"
+          done
+          put dist-site/index.html "index.html"
