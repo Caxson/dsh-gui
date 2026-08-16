@@ -12,6 +12,15 @@ files:
   - assets/**/*
   - package.json
   - node_modules/**/*
+  # Ship only what runs. Source maps alone are 61MB and nothing loads them in
+  # production; type declarations, package docs and test fixtures are likewise
+  # dead weight in an installer. Deliberately NOT excluding plain .ts sources —
+  # the engine can load TypeScript at runtime (dsh-typert-*), so dropping those
+  # would trade size for a broken feature. LICENSE files stay, for compliance.
+  - '!**/*.{map,d.ts,d.mts,d.cts,tsbuildinfo}'
+  - '!**/{README,readme,CHANGELOG,changelog,HISTORY}*'
+  - '!**/{test,tests,__tests__,spec,example,examples,docs,doc}/**'
+  - '!**/{.github,.vscode,.idea}/**'
 
 # Chromium for the browser pane is NOT bundled: it is ~355MB, roughly 40% of
 # the installed app, and most people never open that tab. It is downloaded on
@@ -26,6 +35,12 @@ asar: false
 
 # Rely on the shipped N-API prebuilds; do not rebuild against Electron headers.
 npmRebuild: false
+
+# The app is Chinese/English only; Electron otherwise ships ~50 locale bundles
+# totalling 47MB.
+electronLanguages:
+  - en-US
+  - zh-CN
 
 mac:
   category: public.app-category.developer-tools

@@ -363,7 +363,8 @@
     return navigator.hardwareConcurrency >= 8 ? true : null;
   }
 
-  function bytes(n) { return n > 0 ? (n / 1048576).toFixed(0) + ' MB' : ''; }
+  // Deliberately no file size on the button: a three-digit number reads as a
+  // warning and puts people off before they have any reason to care.
 
   /** Minimal, defensive parse of the fields we need out of latest-mac.yml. */
   function parseFeed(text) {
@@ -385,7 +386,7 @@
   }
 
   function setLink(el, label, file) {
-    el.textContent = label + (file.size ? ' · ' + bytes(file.size) : '');
+    el.textContent = label;
     el.href = BASE + file.url;
     el.setAttribute('download', '');
     el.removeAttribute('aria-disabled');
