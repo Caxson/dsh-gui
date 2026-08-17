@@ -18,6 +18,7 @@ const { join } = require('node:path');
 const { existsSync, mkdirSync, writeFileSync, readFileSync, symlinkSync } = require('node:fs');
 const { autoUpdater } = require('electron-updater');
 const { resolveBrowsersPath, isInstalled, ensureChromium } = require('./chromium');
+const { insertIntoComposer } = require('./composer');
 
 const APP_NAME = 'Dsh GUI';
 const APP_ROOT = join(__dirname, '..');
@@ -134,6 +135,10 @@ const PANEL_WIDTH = 400;
 let panelView = null;
 let popupWin = null; // panel popped out into its own window
 let chromiumInstall = null; // in-flight on-demand Chromium download, if any
+// Smoke-only: whether the run has already created its workspace + session, and
+// what came of it (reported alongside the probes).
+let smokeSeeded = false;
+let smokeSeed = 'skipped';
 // Hidden by default (Codex-style: surface the panel on demand via Cmd+B).
 // Smoke mode forces it visible so the layout probe can exercise both states.
 let panelVisible = SMOKE;
@@ -414,6 +419,39 @@ function wirePanelIpc() {
     });
     return chromiumInstall;
   });
+
+  // The panel is a file:// document, so it cannot address the engine with a
+  // relative URL — every other pane already talks through IPC, and the file
+  // tree does too. Main holds the engine's address and proxies the call.
+  ipcMain.handle('panel:files-list', async (_e, path, showAll) => {
+    if (!engineUrl) return { error: '引擎尚未就绪' };
+    try {
+      const res = await fetch(`${engineUrl}/dsh-gui/files/list`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: String(path ?? ''), showAll: showAll === true }),
+        cache: 'no-store',
+      });
+      const data = await res.json();
+      if (!res.ok) return { error: data.error || `HTTP ${res.status}` };
+      return data;
+    } catch (err) {
+      return { error: err.message };
+    }
+  });
+
+  // Backflow: the panel hands a reference (a file path, a diff excerpt) to the
+  // chat composer. Reaching into the engine's page is confined to
+  // src/composer.js; here we only route it and make sure the chat is visible,
+  // since text arriving in an off-screen composer reads as nothing happening.
+  ipcMain.handle('panel:compose-insert', async (_e, text) => {
+    // Focus first, not after: the insertion uses execCommand, which the
+    // browser only honours in a focused document — and the click that triggers
+    // this happens in the panel, so the chat view is exactly what does *not*
+    // have focus at that moment.
+    if (mainView && !mainView.webContents.isDestroyed()) mainView.webContents.focus();
+    return insertIntoComposer(mainView && mainView.webContents, text);
+  });
 }
 
 /**
@@ -691,6 +729,35 @@ function createWindow() {
     // The splash (data: URL) also fires did-finish-load — the probe must only
     // run once the real engine page is up, or its typed input hits a dropped
     // engineUrl and the terminal read comes back empty.
+    // A smoke run starts from an empty DSH home, where the app sits on the
+    // "choose a workspace" screen: no workspace root for the file tree, and a
+    // read-only composer. That is not the state a user is in, so give the run
+    // the same starting point they have — one workspace, one session — and
+    // reload, since the page decides what to open at load time. The flag keeps
+    // that reload from re-entering this handler forever.
+    if (SMOKE && !smokeSeeded && mainView.webContents.getURL().startsWith('http')) {
+      smokeSeeded = true;
+      try {
+        const rpc = async (method, payload) => {
+          const res = await fetch(`${engineUrl}/api/${method}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: 'client-request', rpcId: `smoke-${method}`, method, payload }),
+          });
+          const body = await res.json();
+          if (!body?.result?.ok) throw new Error(`${method}: ${JSON.stringify(body?.result?.error ?? body)}`);
+          return body.result.value;
+        };
+        const { workspace } = await rpc('workspace.create', { path: APP_ROOT });
+        await rpc('session.create', { workspaceId: workspace.workspaceId });
+        smokeSeed = 'ok';
+      } catch (err) {
+        smokeSeed = `see:${err.message}`;
+      }
+      mainView.webContents.reload();
+      return;
+    }
+
     if (SMOKE && mainView.webContents.getURL().startsWith('http')) {
       // End-to-end probe: open the panel's terminal tab, type a command
       // through the real IPC/PTY path, and read the buffer back to prove the
@@ -701,6 +768,7 @@ function createWindow() {
           if (dshChild) dshChild.kill('SIGTERM');
           app.exit(0);
         };
+
         try {
           if (!panelView || panelView.webContents.isDestroyed()) {
             finish({ smoke: 'ok', url: mainView.webContents.getURL(), title: win.getTitle(), panel: 'missing' });
@@ -738,6 +806,75 @@ function createWindow() {
                 const browserState = await panelView.webContents.executeJavaScript(
                   `__panelProbe.browserState()`,
                 );
+                // backflow probe: click the reference button on the first tree
+                // row and check the engine's own composer received it. The
+                // send button is the honest signal — text can be present in
+                // the DOM while the engine still believes the box is empty,
+                // which is exactly the failure mode this path has to avoid.
+                await panelView.webContents.executeJavaScript(`__panelProbe.open('tree')`);
+                // Wait for the listing rather than guessing how long it takes:
+                // a fixed delay passes on this machine and fails on a slower
+                // runner, which is worse than failing outright because it makes
+                // the probe flaky instead of informative.
+                for (let i = 0; i < 40; i++) {
+                  const rows = await panelView.webContents.executeJavaScript(
+                    `__panelProbe.treeRowCount()`,
+                  );
+                  if (rows > 0) break;
+                  await new Promise((r) => setTimeout(r, 250));
+                }
+                // Which controls are disabled right now. The engine enables its
+                // send control once it believes the composer is non-empty, so
+                // the transition is the proof that the text was accepted —
+                // identified by that state change rather than by a label, which
+                // is localized (the CI runner speaks English, this machine does
+                // not) or by a class name, which is content hashed.
+                const disabledMap = `(() => [...document.querySelectorAll('button')].map((b) => b.disabled))()`;
+                const before = await mainView.webContents.executeJavaScript(disabledMap, true);
+                const ref = await panelView.webContents.executeJavaScript(
+                  `__panelProbe.treeRefFirst()`,
+                );
+                const readComposer = `(() => {
+                  const vis = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+                  const ta = [...document.querySelectorAll('textarea')].filter(vis)
+                    .sort((a, b) => {
+                      const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+                      return rb.width * rb.height - ra.width * ra.height;
+                    })[0];
+                  return { value: ta ? ta.value : null, readOnly: ta ? ta.readOnly : null };
+                })()`;
+                // Poll for the text instead of assuming a round trip and a
+                // React render fit in a fixed delay.
+                let composer = null;
+                for (let i = 0; i < 20; i++) {
+                  composer = await mainView.webContents.executeJavaScript(readComposer, true);
+                  if (ref.clicked && composer.value && composer.value.includes(ref.path)) break;
+                  await new Promise((r) => setTimeout(r, 250));
+                }
+                const refResult = await panelView.webContents.executeJavaScript(
+                  `__panelProbe.lastRef()`,
+                );
+                const after = await mainView.webContents.executeJavaScript(disabledMap, true);
+                // Some control must have gone from disabled to enabled. Compare
+                // position-wise when the button set is unchanged; otherwise fall
+                // back to "fewer are disabled than before".
+                const countDisabled = (list) => list.filter(Boolean).length;
+                const enabledSomething =
+                  before.length === after.length
+                    ? before.some((wasDisabled, i) => wasDisabled && !after[i])
+                    : countDisabled(after) < countDisabled(before);
+
+                // A pass means the engine agrees the text is there: the value
+                // carries the referenced path AND a control left its disabled
+                // state. Value alone is not enough — that is exactly what a
+                // plain .value assignment produces while the engine still
+                // treats the composer as empty.
+                const backflowProbe = !ref.clicked
+                  ? `see:${ref.reason} (seed:${smokeSeed})`
+                  : composer.value && composer.value.includes(ref.path) && enabledSomething
+                    ? 'ok'
+                    : `see:${JSON.stringify({ ref, refResult, composer, before, after, seed: smokeSeed })}`;
+
                 // layout probe: the panel must take space from the window,
                 // never overlay the main view (Codex-style reallocation)
                 const winW = win.getContentBounds().width;
@@ -757,6 +894,7 @@ function createWindow() {
                   panel: 'ok',
                   ptyProbe: String(text).includes('PANEL_PTY_OK') ? 'ok' : `see:${String(text).slice(0, 120)}`,
                   browserProbe: browserState.emptyVisible === true ? 'ok(not-launched)' : `see:${JSON.stringify(browserState)}`,
+                  backflowProbe,
                   layoutProbe: layoutOk ? 'ok' : `see:${JSON.stringify({ shown, hidden })}`,
                 });
               } catch (err) {

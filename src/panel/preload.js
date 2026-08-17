@@ -29,6 +29,14 @@ contextBridge.exposeInMainWorld('dshPanel', {
   collapsePanel: () => ipcRenderer.send('panel:collapse'),
   popOut: () => ipcRenderer.send('panel:popout'),
 
+  // Workspace file tree — proxied by main, since this page is file:// and
+  // cannot reach the engine on a relative URL.
+  filesList: (path, showAll) => ipcRenderer.invoke('panel:files-list', path, showAll),
+
+  // Backflow into the chat composer — resolves { ok, reason? } so the caller
+  // can tell the user why nothing appeared.
+  composeInsert: (text) => ipcRenderer.invoke('panel:compose-insert', text),
+
   // Chromium ships separately from the app and is fetched on first use.
   browserStatus: () => ipcRenderer.invoke('panel:browser-status'),
   browserInstall: () => ipcRenderer.invoke('panel:browser-install'),

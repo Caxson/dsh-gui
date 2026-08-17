@@ -354,6 +354,11 @@ export function apply(ctx) {
           path: "/dsh-gui/files/list",
           handler: guard(async (req, res) => {
             const body = await readBody(req).catch(() => ({}));
+            // The workspace root comes from the active session, so before one
+            // exists there is simply nothing to list. That is a normal state on
+            // a freshly opened app, not a failure — report it as such so the
+            // panel can say "start a session" instead of showing an error.
+            if (!cwd) return json(res, { waiting: true, root: null, entries: [], total: 0 });
             const rows = await listDirectory(cwd, String(body.path ?? ""), {
               showAll: body.showAll === true,
             });
