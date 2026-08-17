@@ -215,6 +215,135 @@
     };
   }
 
+  // ── file tree pane ────────────────────────────────────────────────────
+  /**
+   * Browse the workspace. Each directory is fetched only when it is opened,
+   * so a large repository costs nothing until someone looks inside it.
+   */
+  function createTreePane() {
+    const root = el('section', 'pane');
+
+    const head = el('div', 'tree-head');
+    const title = el('div', 'tree-title', '文件树');
+    const sub = el('div', 'tree-sub', '');
+    const actions = el('div', 'tree-actions');
+    const hiddenBtn = el('button', 'tree-btn', '⋯');
+    hiddenBtn.title = '显示被忽略的目录与隐藏文件';
+    const reloadBtn = el('button', 'tree-btn', '⟳');
+    reloadBtn.title = '刷新';
+    actions.append(hiddenBtn, reloadBtn);
+    const headText = el('div', 'tree-headtext');
+    headText.append(title, sub);
+    head.append(headText, actions);
+
+    const body = el('div', 'scroll tree-body');
+    root.append(head, body);
+
+    let showAll = false;
+    const open = new Set(); // directories the user has expanded, by relative path
+
+    async function list(path) {
+      const res = await fetch('/dsh-gui/files/list', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path, showAll }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+      return data;
+    }
+
+    function row(entry, path, depth) {
+      const r = el('div', `tree-row${entry.dir ? ' is-dir' : ''}`);
+      r.style.paddingLeft = `${8 + depth * 14}px`;
+      const chev = el('span', 'tree-chev', entry.dir ? '▸' : '');
+      const icon = el('span', 'tree-icon', entry.dir ? '📁' : '📄');
+      const name = el('span', 'tree-name', entry.name);
+      if (entry.hidden) r.classList.add('is-hidden-entry');
+      r.append(chev, icon, name);
+      if (!entry.dir && entry.size) r.appendChild(el('span', 'tree-size', fmtSize(entry.size)));
+      r.title = path;
+      return { r, chev };
+    }
+
+    function fmtSize(n) {
+      if (n < 1024) return `${n} B`;
+      if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+      return `${(n / 1048576).toFixed(1)} MB`;
+    }
+
+    /** Render one directory's children into `into`, recursing where opened. */
+    async function renderInto(into, path, depth) {
+      let data;
+      try {
+        data = await list(path);
+      } catch (err) {
+        into.appendChild(el('div', 'tree-error', `读取失败: ${err.message}`));
+        return;
+      }
+      if (depth === 0) {
+        const rootName = (data.root || '').split('/').filter(Boolean).pop() || '/';
+        title.textContent = rootName;
+        sub.textContent = `${data.total} 项${data.truncated ? '（已截断）' : ''}`;
+      }
+      if (data.entries.length === 0) {
+        into.appendChild(el('div', 'tree-empty', '空目录'));
+        return;
+      }
+      for (const entry of data.entries) {
+        const childPath = path ? `${path}/${entry.name}` : entry.name;
+        const { r, chev } = row(entry, childPath, depth);
+        into.appendChild(r);
+        if (!entry.dir) continue;
+
+        const kids = el('div', 'tree-kids');
+        kids.hidden = !open.has(childPath);
+        into.appendChild(kids);
+        if (open.has(childPath)) {
+          chev.textContent = '▾';
+          renderInto(kids, childPath, depth + 1);
+        }
+        r.addEventListener('click', async () => {
+          const nowOpen = kids.hidden;
+          kids.hidden = !nowOpen;
+          chev.textContent = nowOpen ? '▾' : '▸';
+          if (nowOpen) {
+            open.add(childPath);
+            if (kids.childElementCount === 0) await renderInto(kids, childPath, depth + 1);
+          } else {
+            open.delete(childPath);
+          }
+        });
+      }
+    }
+
+    async function reload() {
+      body.replaceChildren();
+      body.appendChild(el('div', 'tree-empty', '正在读取…'));
+      const fresh = el('div', 'tree-kids');
+      await renderInto(fresh, '', 0);
+      body.replaceChildren(fresh);
+    }
+
+    reloadBtn.addEventListener('click', reload);
+    hiddenBtn.addEventListener('click', () => {
+      showAll = !showAll;
+      hiddenBtn.classList.toggle('on', showAll);
+      reload();
+    });
+
+    let loaded = false;
+    return {
+      type: 'tree', el: root,
+      onShow() {
+        if (loaded) return;
+        loaded = true;
+        reload();
+      },
+      onResize() {}, dispose() {},
+    };
+  }
+
   // ── web pane ──────────────────────────────────────────────────────────
   function webCard(a) {
     const card = el('div', 'web-card');
@@ -399,5 +528,5 @@
     };
   }
 
-  window.dshPanes = { createTerminalPane, createFilesPane, createWebPane, createSidechatPane };
+  window.dshPanes = { createTerminalPane, createFilesPane, createTreePane, createWebPane, createSidechatPane };
 })();

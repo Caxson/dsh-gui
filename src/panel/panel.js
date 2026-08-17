@@ -11,8 +11,9 @@ const newTabMenu = document.getElementById('newtab-menu');
 
 const TAB_META = {
   terminal: { icon: '❯_', label: '终端', multi: true },
+  tree: { icon: '⌸', label: '文件树', multi: false },
   web: { icon: '◐', label: '浏览器', multi: false },
-  files: { icon: '±', label: '文件', multi: false },
+  files: { icon: '±', label: '改动', multi: false },
   sidechat: { icon: '💬', label: '侧边聊天', multi: true },
 };
 
@@ -37,6 +38,7 @@ function makePane(type) {
     return window.dshPanes.createTerminalPane(ptyId);
   }
   if (type === 'files') return window.dshPanes.createFilesPane();
+  if (type === 'tree') return window.dshPanes.createTreePane();
   if (type === 'web') return window.dshPanes.createWebPane();
   return window.dshPanes.createSidechatPane(`chat-${++chatSeq}`);
 }
@@ -169,6 +171,9 @@ document.addEventListener('keydown', (e) => {
   } else if (key === 'p' && !e.altKey) {
     e.preventDefault();
     openTab('files');
+  } else if (key === 'e' && !e.altKey) {
+    e.preventDefault();
+    openTab('tree');
   } else if (key === 's' && e.altKey) {
     e.preventDefault();
     openTab('sidechat');

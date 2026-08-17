@@ -17,6 +17,7 @@ import { defineTool } from "@deepseek-ai/dsh-tools";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { BlockAssembler, createUserMessage, createAssistantMessage, deepFreeze } from "@deepseek-ai/dsh-llm";
+import { listDirectory } from "./filetree.js";
 
 export const name = "dsh-gui-bridge";
 export const inject = ["tools", "llm"];
@@ -342,6 +343,18 @@ export function apply(ctx) {
           kind: "exact",
           path: "/dsh-gui/state",
           handler: guard(async (_req, res) => json(res, { cwd, home: homedir(), activities })),
+        }),
+        httpCtx.webServer.register({
+          kind: "exact",
+          path: "/dsh-gui/files/list",
+          handler: guard(async (req, res) => {
+            const body = await readBody(req).catch(() => ({}));
+            const rows = await listDirectory(cwd, String(body.path ?? ""), {
+              showAll: body.showAll === true,
+            });
+            if (rows === null) return json(res, { error: "路径不存在或不在工作区内" }, 400);
+            json(res, { ...rows, root: cwd });
+          }),
         }),
         httpCtx.webServer.register({
           kind: "exact",
