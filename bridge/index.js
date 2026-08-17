@@ -26,7 +26,12 @@ const require = createRequire(import.meta.url);
 const MAX_ACTIVITIES = 200;
 const URL_RE = /https?:\/\/[^\s"'<>()]+/g;
 const PTY_OUT_MAX = 400; // ring-buffer chunks per pty
-const DEFAULT_SHELL = process.env.SHELL || "/bin/zsh";
+// Windows has no $SHELL and no /bin/zsh; PowerShell is the closest equivalent
+// to what the terminal tab is for, with cmd.exe as the last resort.
+const DEFAULT_SHELL =
+  process.platform === "win32"
+    ? "powershell.exe"
+    : process.env.SHELL || "/bin/zsh";
 const AGENT_PTY = "agent";
 const PTY_ID_RE = /^[a-z0-9][a-z0-9-]{0,32}$/;
 const SIDECHAT_MAX_TOKENS = 4096;

@@ -385,6 +385,19 @@
     return null;
   }
 
+  /** The Windows installer, ignoring the portable build. */
+  function pickWindows(files) {
+    for (var i = 0; i < files.length; i++) {
+      var u = files[i].url;
+      if (/\.exe$/i.test(u) && !/portable/i.test(u)) return files[i];
+    }
+    return null;
+  }
+
+  function isWindows() {
+    return /Windows|Win32|Win64/i.test(navigator.userAgent || navigator.platform || '');
+  }
+
   function setLink(el, label, file) {
     el.textContent = label;
     el.href = BASE + file.url;
@@ -405,16 +418,34 @@
   function render(feed) {
     var arm = pick(feed.files, true);
     var intel = pick(feed.files, false);
-    if (!arm && !intel) throw new Error('no dmg in feed');
+    var win = pickWindows(feed.files);
+    if (!arm && !intel && !win) throw new Error('no installer in feed');
+
+    // Windows visitors get the Windows build up front, with the Mac builds
+    // still reachable — and vice versa.
+    if (isWindows() && win) {
+      setLink(primary, '下载 Windows 版', win);
+      if (arm) setLink(secondary, '下载 Mac 版（Apple 芯片）', arm);
+      else secondary.hidden = true;
+      meta.innerHTML = '版本 <b>' + feed.version + '</b> · Windows 10+';
+      return true;
+    }
 
     var silicon = isAppleSilicon();
     // Unknown chip (or not a Mac) → lead with Apple Silicon, the common case,
-    // but keep the Intel build one click away rather than hiding it.
+    // but keep the other builds one click away rather than hiding them.
     var lead = (silicon !== false ? arm : intel) || arm || intel;
     var other = lead === arm ? intel : arm;
+    if (!lead && win) {
+      setLink(primary, '下载 Windows 版', win);
+      secondary.hidden = true;
+      meta.innerHTML = '版本 <b>' + feed.version + '</b> · Windows 10+';
+      return true;
+    }
 
     setLink(primary, '下载 ' + (lead === arm ? 'Apple 芯片' : 'Intel 芯片') + '版', lead);
     if (other) setLink(secondary, '下载 ' + (other === arm ? 'Apple 芯片' : 'Intel 芯片') + '版', other);
+    else if (win) setLink(secondary, '下载 Windows 版', win);
     else secondary.hidden = true;
 
     var note = silicon === null ? '未能识别芯片，已默认 Apple 芯片版' : '';

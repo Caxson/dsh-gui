@@ -64,6 +64,26 @@ mac:
     # The zip + latest-mac.yml are what the app's built-in auto-updater uses.
     - target: zip
 
+win:
+  # electron-builder renders the .ico from this PNG.
+  icon: assets/icon-1024.png
+  target:
+    # nsis is the installer people expect; the portable build is for machines
+    # where installing is not an option (locked-down or shared).
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  deleteAppDataOnUninstall: false
+  # Keeping the shortcut name in sync with the product avoids two entries in
+  # the Start menu after a rename.
+  shortcutName: Dsh GUI
+
 # Self-update feed: GitHub Releases is the canonical channel (electron-builder
 # embeds it into app-update.yml and generates latest-mac.yml next to the zip).
 # Mainland-China users can point DSH_GUI_UPDATE_URL at the OSS mirror instead.

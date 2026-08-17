@@ -11,7 +11,10 @@
  * and inlines version + file list into the page, making the live fetch a pure
  * enhancement instead of a requirement.
  *
- * Usage: node scripts/build-site.mjs <latest-mac.yml> [out.html]
+ * Usage: node scripts/build-site.mjs <latest-mac.yml> [out.html] [latest.yml]
+ *
+ * The optional third argument is the Windows feed; its files are folded into
+ * the same list so the page can offer a Windows download too.
  */
 
 import { readFileSync, writeFileSync, mkdirSync, cpSync, existsSync } from 'node:fs'
@@ -39,13 +42,27 @@ function parseFeed(text) {
 }
 
 function main() {
-  const [feedPath, outPath = join(ROOT, 'dist-site', 'index.html')] = process.argv.slice(2)
+  const [feedPath, outPath = join(ROOT, 'dist-site', 'index.html'), winFeedPath] = process.argv.slice(2)
   if (!feedPath) {
     console.error('usage: node scripts/build-site.mjs <latest-mac.yml> [out.html]')
     process.exit(2)
   }
 
   const feed = parseFeed(readFileSync(feedPath, 'utf8'))
+
+  // Windows publishes its own feed; fold its files in so one page can serve
+  // both platforms. A missing or unreadable Windows feed simply means no
+  // Windows button, never a failed build.
+  if (winFeedPath && existsSync(winFeedPath)) {
+    try {
+      const win = parseFeed(readFileSync(winFeedPath, 'utf8'))
+      const seen = new Set(feed.files.map((f) => f.url))
+      for (const f of win.files) if (!seen.has(f.url)) feed.files.push(f)
+    } catch (err) {
+      console.warn(`! ignoring Windows feed: ${err.message}`)
+    }
+  }
+
   const page = readFileSync(join(ROOT, 'site', 'index.html'), 'utf8')
   if (!MARKER.test(page)) throw new Error('site/index.html has no /*__FEED__*/ marker to fill')
 
