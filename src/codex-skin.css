@@ -1,25 +1,107 @@
-/* Dsh GUI — conservative skin over the DSH web theme.
-   Injected into every page via webContents.insertCSS. Only generic rules,
-   so it stays safe across DSH UI updates. */
+/* Dsh GUI — product skin over the DSH web UI.
+ *
+ * The engine exposes a three-layer token system: `--dsw-static-*` is the raw
+ * palette, `--dsw-alias-*` is the semantic layer every component actually
+ * reads, and `body[data-ds-dark-theme]` re-declares the same names for dark
+ * mode. We repaint the semantic layer only — never component class names —
+ * so the skin keeps working when the engine reorganises its markup.
+ *
+ * Both selectors are listed because the dark block's specificity would
+ * otherwise beat a plain `body` rule.
+ *
+ * Palette: deep navy rather than neutral grey, keyed to the product mark
+ * (blue whale) so the app reads as ours at a glance instead of as a default
+ * install.
+ */
 
-html,
-body {
-  background-color: #151517;
+body,
+body[data-ds-dark-theme] {
+  /* surfaces — a cool, slightly blue-shifted near-black */
+  --dsw-alias-bg-base: #0b0e18;
+  --dsw-alias-bg-layer-1: #111524;
+  --dsw-alias-bg-layer-2: #171c30;
+  --dsw-alias-bg-layer-3: #1e243c;
+  --dsw-alias-bg-module-platform: #0b0e18;
+  --dsw-alias-bg-overlay: #141930;
+  --dsw-alias-bg-skeleton: #1a2036;
+  --dsw-alias-bg-multi-select: rgba(61, 92, 232, 0.16);
+
+  /* scrims stay neutral so photos and dialogs do not pick up a colour cast */
+  --dsw-alias-bg-mask-1: rgba(6, 8, 14, 0.55);
+  --dsw-alias-bg-mask-2: rgba(6, 8, 14, 0.72);
+  --dsw-alias-bg-mask-3: rgba(6, 8, 14, 0.88);
+
+  /* hairlines: tinted with the surface hue, not flat white at low alpha */
+  --dsw-alias-border-l1: rgba(126, 152, 224, 0.10);
+  --dsw-alias-border-l2: rgba(126, 152, 224, 0.16);
+  --dsw-alias-border-l2-darkmode-thin: rgba(126, 152, 224, 0.13);
+  --dsw-alias-border-l3: rgba(126, 152, 224, 0.24);
+  --dsw-alias-border-l4: rgba(126, 152, 224, 0.34);
+
+  /* brand — the blue from the product mark */
+  --dsw-alias-brand-primary: #3d5ce8;
+  --dsw-alias-brand-text: #8fa6f5;
+  --dsw-alias-brand-primary-new-colorprimary-new-color: #3d5ce8;
+
+  /* interactive feedback, keyed to the brand rather than grey */
+  --dsw-alias-interactive-bg-hover: rgba(126, 152, 224, 0.09);
+  --dsw-alias-interactive-bg-active: rgba(126, 152, 224, 0.15);
+  --dsw-alias-interactive-bg-hover-accent: rgba(61, 92, 232, 0.18);
+
+  /* type: a hair brighter than default so long transcripts stay readable
+     against the darker surfaces above */
+  --dsw-alias-label-primary: #eef1fa;
+  --dsw-alias-label-secondary: #b9c1d6;
+  --dsw-alias-label-tertiary: #8891a8;
+  --dsw-alias-label-dimmed: #414a63;
+  --dsw-alias-label-primary-foreground: #0b0e18;
+
+  /* Buttons and the composer read from their own fills; left alone they stay
+     the stock neutral grey and look pasted onto the navy surfaces. */
+  --dsw-alias-button-elevated-fill: #232a42;
+  --dsw-alias-button-floating-fill: #171c30;
+  --dsw-alias-button-floating-hover: #1f2540;
+  --dsw-alias-button-ghost-active-fill: #232a42;
+  --dsw-alias-button-primary-dimmed: #2b3865;
+  --dsw-alias-interactive-bg-hover-solid: #1f2540;
+
+  /* Code surfaces carry most of a transcript's visual weight. */
+  --dsw-alias-markdown-code-block: #0e1220;
+  --dsw-alias-markdown-code-block-banner: #171c30;
+  --dsw-alias-markdown-inline-code: #1b2136;
+  --dsw-alias-markdown-code-segment-unselected: #0e1220;
+  --dsw-alias-markdown-code-segment-selected: #232a42;
+  --dsw-alias-markdown-placeholder: #1b2136;
+  --dsw-alias-markdown-tag: #1b2136;
+  --dsw-alias-markdown-citation: #232a42;
+
+  /* The engine paints its own scrollbars inside scroll areas. */
+  --dsw-alias-scrollbar-bg-l1: rgba(126, 152, 224, 0.20);
+  --dsw-alias-scrollbar-bg-l2: rgba(126, 152, 224, 0.30);
+  --dsw-alias-scrollbar-hover-l1: rgba(126, 152, 224, 0.40);
 }
 
-/* softer scrollbars */
+/* The shell paints before the token sheet resolves; without this the window
+   flashes the engine's default grey on every launch. */
+html,
+body {
+  background-color: #0b0e18;
+}
+
+/* Scrollbars: thin, surface-tinted, and only prominent on hover — the default
+   is a light-theme grey that sits oddly on a dark navy surface. */
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(140, 150, 175, 0.32);
+  background: rgba(126, 152, 224, 0.26);
   border-radius: 6px;
   border: 2px solid transparent;
   background-clip: content-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(140, 150, 175, 0.55);
+  background: rgba(126, 152, 224, 0.46);
   background-clip: content-box;
   border: 2px solid transparent;
   border-radius: 6px;
@@ -28,14 +110,12 @@ body {
   background: transparent;
 }
 
-/* no focus ring flashes on click for mouse users */
-button:focus-visible,
-input:focus-visible,
-textarea:focus-visible {
-  outline-color: #4176e6;
+::selection {
+  background: rgba(61, 92, 232, 0.38);
 }
 
-/* selection tint matches the brand */
-::selection {
-  background: rgba(65, 118, 230, 0.35);
+/* Keyboard focus should be unmistakable; pointer users never see it. */
+:focus-visible {
+  outline: 2px solid #5c7bf0;
+  outline-offset: 1px;
 }
