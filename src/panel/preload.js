@@ -33,6 +33,11 @@ contextBridge.exposeInMainWorld('dshPanel', {
   // cannot reach the engine on a relative URL.
   filesList: (path, showAll) => ipcRenderer.invoke('panel:files-list', path, showAll),
 
+  // Desktop actions. Main owns the clipboard and validates the reveal path
+  // against the workspace before handing it to the OS.
+  copyText: (text) => ipcRenderer.invoke('panel:copy-text', text),
+  revealPath: (absPath) => ipcRenderer.invoke('panel:reveal-path', absPath),
+
   // Backflow into the chat composer — resolves { ok, reason? } so the caller
   // can tell the user why nothing appeared.
   composeInsert: (text) => ipcRenderer.invoke('panel:compose-insert', text),

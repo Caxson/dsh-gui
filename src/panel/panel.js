@@ -131,9 +131,30 @@ function renderTabs() {
       closeTab(tab.tabId);
     });
 
-    chip.append(icon, label, close);
+    // Filled in by updateBadges(), which runs on every state update — the tab
+    // strip itself is not re-rendered then, so hover and scroll position
+    // survive.
+    const badge = document.createElement('span');
+    badge.className = 'tab-badge';
+    badge.hidden = true;
+
+    chip.dataset.tabId = String(tab.tabId);
+    chip.append(icon, label, badge, close);
     chip.addEventListener('click', () => activateTab(tab.tabId));
     tabstrip.appendChild(chip);
+  }
+  updateBadges();
+}
+
+/** Show how much a pane is holding, so it can be noticed without switching. */
+function updateBadges() {
+  for (const tab of tabs) {
+    const chip = tabstrip.querySelector(`[data-tab-id="${tab.tabId}"]`);
+    const badge = chip && chip.querySelector('.tab-badge');
+    if (!badge) continue;
+    const count = typeof tab.pane.count === 'number' ? tab.pane.count : 0;
+    badge.textContent = count > 99 ? '99+' : String(count);
+    badge.hidden = count <= 0;
   }
 }
 
@@ -214,6 +235,7 @@ window.dshPanel.onState((s) => {
   for (const tab of tabs) {
     if (tab.pane.renderState) tab.pane.renderState(acts, s.home ?? '');
   }
+  updateBadges();
 });
 
 window.dshPanel.onBrowserShot((shot) => {
@@ -301,6 +323,66 @@ document.addEventListener('keyup', (e) => {
 });
 document.addEventListener('scroll', () => { quoteBtn.hidden = true; }, true);
 
+// ── context menu on anything that names a file ────────────────────────────
+// Right-clicking a path is a desktop expectation; without it the only way to
+// get a path out of the panel is to retype it.
+const ctxMenu = document.createElement('div');
+ctxMenu.className = 'menu';
+ctxMenu.hidden = true;
+document.body.appendChild(ctxMenu);
+
+function hideContextMenu() {
+  ctxMenu.hidden = true;
+}
+
+function showContextMenu(x, y, items) {
+  ctxMenu.replaceChildren();
+  for (const item of items) {
+    const btn = document.createElement('button');
+    btn.className = 'menu-item';
+    btn.textContent = item.label;
+    btn.addEventListener('click', async () => {
+      hideContextMenu();
+      await item.run();
+    });
+    ctxMenu.appendChild(btn);
+  }
+  ctxMenu.hidden = false;
+  // Place it fully on screen — the panel is narrow, so a menu opened near the
+  // right edge would otherwise be clipped.
+  const { width, height } = ctxMenu.getBoundingClientRect();
+  ctxMenu.style.left = `${Math.min(x, window.innerWidth - width - 6)}px`;
+  ctxMenu.style.top = `${Math.min(y, window.innerHeight - height - 6)}px`;
+}
+
+document.addEventListener('click', hideContextMenu);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideContextMenu(); });
+
+document.addEventListener('contextmenu', (e) => {
+  const row = e.target.closest ? e.target.closest('.tree-row, .file-card') : null;
+  if (!row) return;
+  // `title` on a tree row holds its workspace-relative path; a change card
+  // stores its own.
+  const rel = row.classList.contains('file-card') ? row.dataset.path : row.title;
+  if (!rel) return;
+  e.preventDefault();
+
+  const root = latestState && latestState.cwd;
+  const absolute = root ? `${root}/${rel}` : null;
+  const items = [
+    { label: '引用到对话', run: () => window.dshPanes.sendRef(`@${rel}`, null) },
+    { label: '复制路径', run: () => window.dshPanel.copyText(rel) },
+  ];
+  if (absolute) {
+    items.push({ label: '复制绝对路径', run: () => window.dshPanel.copyText(absolute) });
+    items.push({
+      label: navigator.platform.startsWith('Win') ? '在文件资源管理器中显示' : '在访达中显示',
+      run: () => window.dshPanel.revealPath(absolute),
+    });
+  }
+  showContextMenu(e.clientX, e.clientY, items);
+});
+
 quoteBtn.addEventListener('mousedown', (e) => e.preventDefault()); // keep the selection
 quoteBtn.addEventListener('click', () => {
   const sel = currentSelection();
@@ -352,6 +434,20 @@ window.__panelProbe = {
   /** How many tree rows are on screen — polled, since listing is async. */
   treeRowCount() {
     return document.querySelectorAll('.tree-row').length;
+  },
+  /** Right-click the first tree row and run the named menu entry. */
+  async contextMenuOn(label) {
+    const row = document.querySelector('.tree-row');
+    if (!row) return { ran: false, reason: 'no tree row rendered yet' };
+    row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 20, clientY: 40 }));
+    await new Promise((r) => setTimeout(r, 30));
+    const menu = document.querySelectorAll('.menu')[document.querySelectorAll('.menu').length - 1];
+    if (!menu || menu.hidden) return { ran: false, reason: 'context menu did not open' };
+    const entries = [...menu.querySelectorAll('.menu-item')].map((b) => b.textContent);
+    const item = [...menu.querySelectorAll('.menu-item')].find((b) => b.textContent === label);
+    if (!item) return { ran: false, reason: `no "${label}" entry`, entries };
+    item.click();
+    return { ran: true, path: row.title, entries };
   },
   treeRefFirst() {
     const row = document.querySelector('.tree-row');

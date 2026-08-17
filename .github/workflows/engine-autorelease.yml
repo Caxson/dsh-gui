@@ -59,8 +59,28 @@ jobs:
             exit 0
           fi
           # Only ever touch Dependabot's own grouped engine PRs.
-          meta=$(gh pr view "$pr" --repo "$REPO" \
-                   --json number,author,labels,state,isDraft,mergeable)
+          #
+          # This workflow runs on every pull request, and on a human one its
+          # whole job is to answer "not an engine PR — skip". GitHub's API
+          # returns 5xx often enough that letting a failed lookup fail the job
+          # turns an outage into a red gate on unrelated work. So retry, and if
+          # the answer still will not come, skip: doing nothing is the safe
+          # outcome, and the one thing that must never follow from "cannot tell"
+          # is auto-merging something.
+          meta=''
+          for attempt in 1 2 3; do
+            if meta=$(gh pr view "$pr" --repo "$REPO" \
+                        --json number,author,labels,state,isDraft,mergeable 2>/dev/null); then
+              break
+            fi
+            meta=''
+            [ "$attempt" = 3 ] || sleep 20
+          done
+          if [ -z "$meta" ]; then
+            echo "could not read PR #$pr from the API — skipping rather than guessing"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           author=$(echo "$meta" | jq -r '.author.login')
           labels=$(echo "$meta" | jq -r '[.labels[].name] | join(",")')
           state=$(echo "$meta" | jq -r '.state')

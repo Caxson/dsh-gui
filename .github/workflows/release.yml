@@ -219,9 +219,29 @@ jobs:
           TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
         run: |
           set -euo pipefail
-          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
-            || gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Dsh GUI $TAG" --generate-notes
-          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber out/*
+          # GitHub's API returns 5xx often enough to lose a release here, and
+          # failing at this step is the worst place to fail: the tag exists and
+          # points at a version nobody can download. The build step already
+          # retries its own flaky dependency (notarization); this one has the
+          # same need. Both commands are idempotent — `release view` guards the
+          # create, and `--clobber` makes re-uploading safe.
+          publish() {
+            gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+              || gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Dsh GUI $TAG" --generate-notes
+            gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber out/*
+          }
+          for attempt in 1 2 3 4 5; do
+            if publish; then
+              echo "published on attempt $attempt"
+              break
+            fi
+            if [ "$attempt" = 5 ]; then
+              echo "publishing failed five times — not a transient API problem"
+              exit 1
+            fi
+            echo "attempt $attempt failed; retrying in 30s"
+            sleep 30
+          done
 
       # The mirror is the app's default update feed and backs the download page,
       # so it must never lag a Release. electron-builder writes dot-named files

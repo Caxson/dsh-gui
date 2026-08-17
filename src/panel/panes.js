@@ -149,8 +149,24 @@
     const pre = el('pre', 'diff');
     const rows = diff.rows.slice(0, 300);
     for (const row of rows) {
-      if (row.kind === 'skip') pre.appendChild(el('div', 'skip', `⋯ ${row.count} 行未更改`));
-      else pre.appendChild(el('div', `row ${row.kind}`, row.text || ' '));
+      if (row.kind === 'skip') {
+        // Openable in place: being told 12 lines are hidden is only useful if
+        // they can be seen.
+        const gap = el('div', 'skip', `⋯ 展开 ${row.count} 行未更改`);
+        if (row.lines && row.lines.length) {
+          gap.classList.add('can-expand');
+          gap.addEventListener('click', () => {
+            const frag = document.createDocumentFragment();
+            for (const line of row.lines) frag.appendChild(el('div', 'row ctx', line.text || ' '));
+            gap.replaceWith(frag);
+          });
+        } else {
+          gap.textContent = `⋯ ${row.count} 行未更改`;
+        }
+        pre.appendChild(gap);
+      } else {
+        pre.appendChild(el('div', `row ${row.kind}`, row.text || ' '));
+      }
     }
     const hidden = diff.rows.length - rows.length + (diff.truncated ?? 0);
     if (hidden > 0) pre.appendChild(el('div', 'skip', `⋯ 其余 ${hidden} 行已省略`));

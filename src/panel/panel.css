@@ -65,6 +65,22 @@ body {
   background: rgba(91, 124, 255, 0.35);
 }
 
+/* Keyboard users need to see where they are. :focus-visible only, so a mouse
+   click never leaves a ring behind. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: 4px;
+}
+
+/* Respect a system-level request for less motion. */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
+
 /* ── header: browser-style tab strip ───────────────────────────────────── */
 
 .panel-header {
@@ -130,6 +146,25 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* How much a pane is holding, visible without switching to it. */
+.tab-badge {
+  flex: 0 0 auto;
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 7px;
+  background: var(--bg-hover);
+  color: var(--text-mid);
+  font-size: 9.5px;
+  font-weight: 600;
+  line-height: 14px;
+  text-align: center;
+}
+.tab.active .tab-badge {
+  background: var(--accent);
+  color: #fff;
+}
+.tab-badge[hidden] { display: none; }
 
 .tab-close {
   flex: 0 0 auto;
@@ -485,6 +520,16 @@ body {
   font-size: 10px;
   padding: 1px 10px 1px 22px;
   margin: 2px 0;
+}
+
+/* Only the separators that still hold their lines invite a click. */
+.diff .skip.can-expand {
+  cursor: pointer;
+  user-select: none;
+}
+.diff .skip.can-expand:hover {
+  background: var(--bg-hover);
+  color: var(--text-mid);
 }
 
 .note {
