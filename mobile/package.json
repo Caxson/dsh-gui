@@ -1,0 +1,17 @@
+{
+  "name": "dsh-gui-relay",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Rendezvous relay between the Dsh GUI desktop app and its phone client. Forwards frames between two paired sockets and understands nothing about them.",
+  "type": "module",
+  "main": "relay.mjs",
+  "scripts": {
+    "start": "node relay.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "ws": "8.21.3"
+  }
+}
