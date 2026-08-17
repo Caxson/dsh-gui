@@ -12,9 +12,9 @@
  *      injects the desktop skin, and manages lifecycle.
  */
 
-const { app, BaseWindow, BrowserWindow, WebContentsView, Menu, shell, dialog, ipcMain } = require('electron');
+const { app, BaseWindow, BrowserWindow, WebContentsView, Menu, shell, dialog, ipcMain, clipboard } = require('electron');
 const { spawn } = require('node:child_process');
-const { join } = require('node:path');
+const { join, resolve: resolvePath, sep } = require('node:path');
 const { existsSync, mkdirSync, writeFileSync, readFileSync, symlinkSync } = require('node:fs');
 const { autoUpdater } = require('electron-updater');
 const { resolveBrowsersPath, isInstalled, ensureChromium } = require('./chromium');
@@ -438,6 +438,29 @@ function wirePanelIpc() {
     } catch (err) {
       return { error: err.message };
     }
+  });
+
+  ipcMain.handle('panel:copy-text', (_e, text) => {
+    if (typeof text !== 'string' || !text) return { ok: false, reason: 'empty' };
+    clipboard.writeText(text);
+    return { ok: true };
+  });
+
+  // Reveal a workspace file in the OS file manager. The path is checked against
+  // the workspace root here rather than trusted from the renderer: the panel is
+  // our own code today, but a reveal is a filesystem action and the check costs
+  // nothing.
+  ipcMain.handle('panel:reveal-path', (_e, absPath) => {
+    const root = lastBridgeState && lastBridgeState.cwd;
+    if (!root) return { ok: false, reason: 'no-workspace' };
+    if (typeof absPath !== 'string' || !absPath) return { ok: false, reason: 'empty' };
+    const resolved = resolvePath(absPath);
+    if (resolved !== root && !resolved.startsWith(root + sep)) {
+      return { ok: false, reason: 'outside-workspace' };
+    }
+    if (!existsSync(resolved)) return { ok: false, reason: 'missing' };
+    shell.showItemInFolder(resolved);
+    return { ok: true };
   });
 
   // Backflow: the panel hands a reference (a file path, a diff excerpt) to the
@@ -864,6 +887,25 @@ function createWindow() {
                     ? before.some((wasDisabled, i) => wasDisabled && !after[i])
                     : countDisabled(after) < countDisabled(before);
 
+                // Right-click a path and copy it: asserted through the real
+                // clipboard, since "the menu item ran" says nothing about
+                // whether anything reached it.
+                // The clipboard belongs to whoever is using this machine; the
+                // probe borrows it and puts back what it found.
+                const clipboardBefore = clipboard.readText();
+                clipboard.writeText('SMOKE_CLIPBOARD_UNSET');
+                const ctx = await panelView.webContents.executeJavaScript(
+                  `__panelProbe.contextMenuOn('复制路径')`,
+                );
+                await new Promise((r) => setTimeout(r, 300));
+                const clipped = clipboard.readText();
+                clipboard.writeText(clipboardBefore);
+                const contextMenuProbe = !ctx.ran
+                  ? `see:${ctx.reason}${ctx.entries ? ` entries=${JSON.stringify(ctx.entries)}` : ''}`
+                  : clipped === ctx.path
+                    ? 'ok'
+                    : `see:${JSON.stringify({ wanted: ctx.path, clipboard: clipped })}`;
+
                 // The other half of the backflow: select text in the panel and
                 // click the quote button that appears over it.
                 const quote = await panelView.webContents.executeJavaScript(
@@ -913,6 +955,7 @@ function createWindow() {
                   browserProbe: browserState.emptyVisible === true ? 'ok(not-launched)' : `see:${JSON.stringify(browserState)}`,
                   backflowProbe,
                   quoteProbe,
+                  contextMenuProbe,
                   layoutProbe: layoutOk ? 'ok' : `see:${JSON.stringify({ shown, hidden })}`,
                 });
               } catch (err) {
