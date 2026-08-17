@@ -106,6 +106,20 @@ function activateTab(tabId) {
   renderTabs();
   window.dshPanel.tabChanged(tab.type);
   tab.pane.onShow();
+  // Floating things belong to what was on screen a moment ago, not to what is
+  // on screen now.
+  dismissFloating();
+}
+
+/**
+ * Anything that floats over the panel registers a way to dismiss itself, so
+ * this works no matter where those widgets are created relative to here. A
+ * `typeof` guard would not do: these are `const`, and `typeof` on a binding in
+ * its temporal dead zone throws rather than returning "undefined".
+ */
+const floatingDismissers = [];
+function dismissFloating() {
+  for (const dismiss of floatingDismissers) dismiss();
 }
 
 function renderTabs() {
@@ -265,6 +279,7 @@ quoteBtn.className = 'quote-btn';
 quoteBtn.textContent = '引用到对话';
 quoteBtn.hidden = true;
 document.body.appendChild(quoteBtn);
+floatingDismissers.push(() => { quoteBtn.hidden = true; });
 
 /**
  * The current selection. The terminal keeps its own — xterm renders to a
@@ -321,7 +336,10 @@ document.addEventListener('mouseup', () => setTimeout(refreshQuoteButton, 0));
 document.addEventListener('keyup', (e) => {
   if (e.shiftKey || e.key === 'Escape') setTimeout(refreshQuoteButton, 0);
 });
-document.addEventListener('scroll', () => { quoteBtn.hidden = true; }, true);
+// Both the quote button and the context menu are position:fixed, so anything
+// scrolling underneath would leave them pointing at the wrong row.
+document.addEventListener('scroll', dismissFloating, true);
+window.addEventListener('resize', dismissFloating);
 
 // ── context menu on anything that names a file ────────────────────────────
 // Right-clicking a path is a desktop expectation; without it the only way to
@@ -330,6 +348,7 @@ const ctxMenu = document.createElement('div');
 ctxMenu.className = 'menu';
 ctxMenu.hidden = true;
 document.body.appendChild(ctxMenu);
+floatingDismissers.push(() => { ctxMenu.hidden = true; });
 
 function hideContextMenu() {
   ctxMenu.hidden = true;
