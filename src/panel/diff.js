@@ -64,7 +64,12 @@
       const keepTail = isEdge === 'end' ? 0 : CONTEXT;
       if (run.length > keepHead + keepTail + 1) {
         rows.push(...run.slice(0, keepHead));
-        rows.push({ kind: 'skip', count: run.length - keepHead - keepTail });
+        const folded = run.slice(keepHead, run.length - keepTail);
+        // Carry the folded lines with the separator rather than discarding
+        // them: the reader can then open the gap in place instead of being
+        // told what they are missing and having no way to see it. Bounded by
+        // MAX_LINES upstream, so this cannot grow without limit.
+        rows.push({ kind: 'skip', count: folded.length, lines: folded });
         rows.push(...run.slice(run.length - keepTail));
       } else {
         rows.push(...run);

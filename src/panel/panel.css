@@ -487,6 +487,16 @@ body {
   margin: 2px 0;
 }
 
+/* Only the separators that still hold their lines invite a click. */
+.diff .skip.can-expand {
+  cursor: pointer;
+  user-select: none;
+}
+.diff .skip.can-expand:hover {
+  background: var(--bg-hover);
+  color: var(--text-mid);
+}
+
 .note {
   padding: 4px 10px 8px;
   color: var(--text-dim);
