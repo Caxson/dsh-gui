@@ -864,6 +864,23 @@ function createWindow() {
                     ? before.some((wasDisabled, i) => wasDisabled && !after[i])
                     : countDisabled(after) < countDisabled(before);
 
+                // The other half of the backflow: select text in the panel and
+                // click the quote button that appears over it.
+                const quote = await panelView.webContents.executeJavaScript(
+                  `__panelProbe.quoteFirstSelection()`,
+                );
+                let quoted = null;
+                for (let i = 0; i < 20; i++) {
+                  quoted = await mainView.webContents.executeJavaScript(readComposer, true);
+                  if (quoted.value && quoted.value.includes('```')) break;
+                  await new Promise((r) => setTimeout(r, 250));
+                }
+                const quoteProbe = !quote.quoted
+                  ? `see:${quote.reason} ${JSON.stringify(quote.diag ?? {})}`
+                  : quoted.value && quoted.value.includes('```') && quoted.value.includes(quote.text)
+                    ? 'ok'
+                    : `see:${JSON.stringify({ quote, value: quoted && quoted.value })}`;
+
                 // A pass means the engine agrees the text is there: the value
                 // carries the referenced path AND a control left its disabled
                 // state. Value alone is not enough — that is exactly what a
@@ -895,6 +912,7 @@ function createWindow() {
                   ptyProbe: String(text).includes('PANEL_PTY_OK') ? 'ok' : `see:${String(text).slice(0, 120)}`,
                   browserProbe: browserState.emptyVisible === true ? 'ok(not-launched)' : `see:${JSON.stringify(browserState)}`,
                   backflowProbe,
+                  quoteProbe,
                   layoutProbe: layoutOk ? 'ok' : `see:${JSON.stringify({ shown, hidden })}`,
                 });
               } catch (err) {

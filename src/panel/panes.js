@@ -199,6 +199,9 @@
   function fileCard(group, autoOpen, homeDir, workspaceRoot) {
     const open = userToggled.has(group.path) ? userToggled.get(group.path) : autoOpen;
     const card = el('div', `file-card${open ? ' open' : ''}`);
+    // Lets a selection made anywhere inside this card carry the file it came
+    // from, without the quote affordance knowing anything about diff internals.
+    card.dataset.path = workspaceRelative(group.path, workspaceRoot);
     const head = el('div', 'file-head');
     head.appendChild(el('span', 'chev', '▶'));
     const { dir, name } = splitPath(group.path, homeDir);
@@ -613,5 +616,10 @@
     };
   }
 
-  window.dshPanes = { createTerminalPane, createFilesPane, createTreePane, createWebPane, createSidechatPane };
+  window.dshPanes = {
+    createTerminalPane, createFilesPane, createTreePane, createWebPane, createSidechatPane,
+    // Shared so the selection-quote affordance in panel.js reports success and
+    // failure exactly the way the per-row buttons do.
+    sendRef, workspaceRelative,
+  };
 })();

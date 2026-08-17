@@ -233,6 +233,85 @@ window.addEventListener('resize', () => {
   if (tab) tab.pane.onResize();
 });
 
+// ── quote a selection into the chat ───────────────────────────────────────
+// Seeing something in a diff or in terminal output and asking about it should
+// not mean retyping it. Selecting text anywhere in the panel offers to send it,
+// fenced, with the file it came from — an affordance that appears where the
+// user is looking rather than a shortcut they have to already know.
+const quoteBtn = document.createElement('button');
+quoteBtn.className = 'quote-btn';
+quoteBtn.textContent = '引用到对话';
+quoteBtn.hidden = true;
+document.body.appendChild(quoteBtn);
+
+/**
+ * The current selection. The terminal keeps its own — xterm renders to a
+ * canvas, so the document selection is empty there — and it is the only pane
+ * that needs asking directly.
+ */
+function currentSelection() {
+  const domText = (window.getSelection()?.toString() ?? '').trim();
+  if (domText) {
+    const node = window.getSelection().anchorNode;
+    const host = node && (node.nodeType === 1 ? node : node.parentElement);
+    const card = host && host.closest ? host.closest('.file-card') : null;
+    return { text: domText, path: card ? card.dataset.path : null, rect: selectionRect() };
+  }
+  const tab = tabById(activeTabId);
+  if (tab && tab.type === 'terminal' && tab.pane.term) {
+    const termText = (tab.pane.term.getSelection() ?? '').trim();
+    if (termText) return { text: termText, path: null, rect: null };
+  }
+  return null;
+}
+
+function selectionRect() {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return null;
+  const rect = sel.getRangeAt(0).getBoundingClientRect();
+  return rect.width || rect.height ? rect : null;
+}
+
+function refreshQuoteButton() {
+  const sel = currentSelection();
+  if (!sel) {
+    quoteBtn.hidden = true;
+    return;
+  }
+  quoteBtn.hidden = false;
+  // Above the selection when we know where it is; otherwise pinned bottom-right
+  // (the terminal's selection has no DOM geometry to anchor to).
+  if (sel.rect) {
+    const top = Math.max(4, sel.rect.top - 30);
+    const left = Math.min(
+      Math.max(6, sel.rect.left),
+      window.innerWidth - quoteBtn.offsetWidth - 6,
+    );
+    quoteBtn.style.top = `${top}px`;
+    quoteBtn.style.left = `${left}px`;
+  } else {
+    quoteBtn.style.top = `${window.innerHeight - 44}px`;
+    quoteBtn.style.left = '10px';
+  }
+}
+
+document.addEventListener('mouseup', () => setTimeout(refreshQuoteButton, 0));
+document.addEventListener('keyup', (e) => {
+  if (e.shiftKey || e.key === 'Escape') setTimeout(refreshQuoteButton, 0);
+});
+document.addEventListener('scroll', () => { quoteBtn.hidden = true; }, true);
+
+quoteBtn.addEventListener('mousedown', (e) => e.preventDefault()); // keep the selection
+quoteBtn.addEventListener('click', () => {
+  const sel = currentSelection();
+  if (!sel) return;
+  // Fenced, so the agent sees the excerpt as content rather than as prose, and
+  // labelled with the file when the selection came from one.
+  const body = ['```', sel.text, '```'].join('\n');
+  window.dshPanes.sendRef(sel.path ? `@${sel.path}\n${body}` : body, quoteBtn);
+  quoteBtn.hidden = true;
+});
+
 // ── boot + smoke probe surface ────────────────────────────────────────────
 openTab('terminal');
 
@@ -284,5 +363,46 @@ window.__panelProbe = {
   /** What the last reference attempt reported back from the main process. */
   lastRef() {
     return window.__lastRef ?? null;
+  },
+  /**
+   * Drive the selection-quote affordance the way a user does: select some text
+   * in the panel, then click the button that appears over it.
+   */
+  async quoteFirstSelection() {
+    // Tree rows carry `user-select: none` (clicking a row should not smear a
+    // selection across it), so pick text the user could actually select — a
+    // diff line when there is one, otherwise the tree header.
+    const sel = window.getSelection();
+    let target = null;
+    for (const candidate of document.querySelectorAll('.diff .row, .tree-sub, .tree-title')) {
+      if (!candidate.textContent.trim()) continue;
+      const probe = document.createRange();
+      probe.selectNodeContents(candidate);
+      sel.removeAllRanges();
+      sel.addRange(probe);
+      if (sel.toString().trim()) { target = candidate; break; }
+      sel.removeAllRanges();
+    }
+    if (!target) return { quoted: false, reason: 'no selectable text rendered' };
+    document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+    // The handler defers a tick on purpose — after a real mouseup the selection
+    // is not always final yet — so wait for it the same way.
+    await new Promise((r) => setTimeout(r, 50));
+    const btn = document.querySelector('.quote-btn');
+    if (!btn || btn.hidden) {
+      return {
+        quoted: false,
+        reason: 'quote button did not appear',
+        diag: {
+          buttonExists: !!btn,
+          hidden: btn ? btn.hidden : null,
+          selText: sel.toString(),
+          from: target.className,
+        },
+      };
+    }
+    const text = sel.toString();
+    btn.click();
+    return { quoted: true, text };
   },
 };
