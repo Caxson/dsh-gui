@@ -193,11 +193,13 @@ function createPanelView() {
   });
   panelView.setBackgroundColor('#151517');
   panelView.webContents.loadFile(join(__dirname, 'panel', 'panel.html'));
-  if (SMOKE) {
-    panelView.webContents.on('did-finish-load', () => {
-      console.log(JSON.stringify({ panel: 'ok' }));
-    });
-  }
+  panelView.webContents.on('did-finish-load', () => {
+    // Covers a reload of the docked panel; on the first load this is a no-op,
+    // because the shared cursor has not moved yet and the poll delivers the
+    // history anyway.
+    replayTerminalsTo(panelView.webContents);
+    if (SMOKE) console.log(JSON.stringify({ panel: 'ok' }));
+  });
   layoutViews();
 }
 
@@ -271,6 +273,40 @@ async function pollTerminalOut() {
       }
     } catch (err) {
       if (process.env.DSH_GUI_DEBUG) console.log(`[pty-debug] out ${id} failed: ${err.message}`);
+    }
+  }
+}
+
+/**
+ * Give a freshly attached panel renderer the terminal history it missed.
+ *
+ * Output is polled once per terminal and broadcast to every panel, with a
+ * single shared cursor per pty. That is right for keeping panels in step, but
+ * it means a renderer that attaches later — the popped-out window, or the
+ * docked panel after a reload — starts at a cursor that has already moved past
+ * everything the agent did, and shows an empty terminal.
+ *
+ * So replay the ring buffer from the start, to that renderer only. The buffer
+ * is capped by the bridge, so this is bounded.
+ */
+async function replayTerminalsTo(webContents) {
+  if (!engineUrl || !webContents || webContents.isDestroyed()) return;
+  for (const id of openTerminalIds) {
+    // Only for terminals the shared cursor has already moved past. On the very
+    // first attach it has not, and the normal poll will deliver the same
+    // history — replaying as well would print everything twice.
+    if (!termSeqs.has(id)) continue;
+    try {
+      const res = await fetch(
+        `${engineUrl}/dsh-gui/terminal/out?id=${encodeURIComponent(id)}&since=-1`,
+        { cache: 'no-store' },
+      );
+      if (!res.ok) continue;
+      const data = await res.json();
+      if (webContents.isDestroyed()) return;
+      for (const chunk of data.chunks ?? []) webContents.send('panel:pty-data', id, chunk);
+    } catch (err) {
+      if (process.env.DSH_GUI_DEBUG) console.log(`[pty-debug] replay ${id} failed: ${err.message}`);
     }
   }
 }
@@ -364,6 +400,9 @@ function popOutPanel() {
   popupWin.loadFile(join(__dirname, 'panel', 'panel.html'));
   popupWin.webContents.on('did-finish-load', () => {
     if (lastBridgeState) popupWin.webContents.send('panel:state', lastBridgeState);
+    // Without this the popped-out terminal opens blank: the shared output
+    // cursor is already past everything the agent has done.
+    replayTerminalsTo(popupWin.webContents);
   });
   // Remember whether the dock was visible before popping out, so closing the
   // popup restores exactly that state (never un-collapses a panel the user
@@ -934,6 +973,24 @@ function createWindow() {
                     ? 'ok'
                     : `see:${JSON.stringify({ ref, refResult, composer, before, after, seed: smokeSeed })}`;
 
+                // Popping the panel out must not lose the terminal history —
+                // the shared output cursor has already moved past it, so the
+                // new window only sees it if it is replayed.
+                popOutPanel();
+                let popupTerm = '';
+                for (let i = 0; i < 30; i++) {
+                  await new Promise((r) => setTimeout(r, 250));
+                  if (!popupWin || popupWin.isDestroyed()) continue;
+                  popupTerm = String(
+                    await popupWin.webContents.executeJavaScript(`__panelProbe.agentTermText()`),
+                  );
+                  if (popupTerm.includes('PANEL_PTY_OK')) break;
+                }
+                const replayProbe = popupTerm.includes('PANEL_PTY_OK')
+                  ? 'ok'
+                  : `see:${popupTerm.slice(0, 120) || '(empty)'}`;
+                if (popupWin && !popupWin.isDestroyed()) popupWin.destroy();
+
                 // layout probe: the panel must take space from the window,
                 // never overlay the main view (Codex-style reallocation)
                 const winW = win.getContentBounds().width;
@@ -956,6 +1013,7 @@ function createWindow() {
                   backflowProbe,
                   quoteProbe,
                   contextMenuProbe,
+                  replayProbe,
                   layoutProbe: layoutOk ? 'ok' : `see:${JSON.stringify({ shown, hidden })}`,
                 });
               } catch (err) {
