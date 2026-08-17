@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Dsh GUI — DeepSeek Harness 的 macOS 桌面客户端</title>
-<meta name="description" content="Dsh GUI 是 DeepSeek Harness (DSH) 的 macOS 桌面客户端。支持把 Claude Code、Codex、pi 的历史会话自动导入并接着往下干。Apple 芯片与 Intel 均可下载。">
+<title>Dsh GUI — DeepSeek Harness 的桌面客户端</title>
+<meta name="description" content="Dsh GUI 是 DeepSeek Harness (DSH) 的桌面客户端。支持把 Claude Code、Codex、pi 的历史会话自动导入并接着往下干。提供 macOS（Apple 芯片 / Intel）与 Windows 下载。">
 <link rel="icon" href="assets/logo.png">
 <link rel="apple-touch-icon" href="assets/logo.png">
 <style>
@@ -87,6 +87,10 @@
   .btn[aria-disabled="true"] { background: #141414; color: var(--muted); border-color: var(--line); pointer-events: none; }
   .sub { margin: 18px 0 0; color: #6f6f76; font-size: 13.5px; }
   .sub b { color: var(--muted); font-weight: 500; }
+  .alts { margin: 10px 0 0; color: #55555f; font-size: 13px; }
+  .alts a { color: #8a8a93; text-decoration: none; border-bottom: 1px solid #2c2c33; }
+  .alts a:hover { color: var(--fg); border-bottom-color: #55555f; }
+  .alts .sep { padding: 0 8px; color: #35353c; }
   .textlink { display: inline-flex; align-items: center; gap: 6px; margin-top: 18px; color: var(--muted); font-size: 14.5px; text-decoration: none; }
   .textlink:hover { color: var(--fg); }
 
@@ -187,7 +191,7 @@
     <div>
       <h1>下载桌面<br>版 Dsh GUI</h1>
       <p class="lede">
-        把 DeepSeek Harness 引擎装进一个 macOS 应用：多标签终端、内置浏览器、
+        把 DeepSeek Harness 引擎装进一个桌面应用：多标签终端、内置浏览器、
         插件市场，以及把别的 agent 的历史会话直接接过来继续干。
       </p>
       <p class="lede small">开源、本地运行，引擎只监听 127.0.0.1。</p>
@@ -197,6 +201,9 @@
         <a id="secondary" class="btn ghost" href="#" hidden></a>
       </div>
       <p class="sub" id="meta"></p>
+      <!-- Anything the two buttons above cannot hold lands here, so no build is
+           ever unreachable just because the visitor is on another platform. -->
+      <p class="alts" id="alts" hidden></p>
       <a class="textlink" href="https://github.com/Caxson/dsh-gui/releases">查看全部版本与更新日志 ›</a>
     </div>
 
@@ -335,7 +342,9 @@
   // latest-mac.yml at load time means a new release is live here the moment it
   // is mirrored — the page never needs redeploying.
   var BASE = 'https://merefusion-static.oss-cn-hangzhou.aliyuncs.com/dsh-gui/';
-  var FEED = BASE + 'latest-mac.yml';
+  // Each platform publishes its own feed; the page unions them so no build is
+  // reachable on one platform's page and invisible on another's.
+  var FEEDS = [BASE + 'latest-mac.yml', BASE + 'latest.yml'];
   var RELEASES = 'https://github.com/Caxson/dsh-gui/releases';
 
   // Baked at deploy time from the release's own latest-mac.yml (see
@@ -346,6 +355,7 @@
   var primary = document.getElementById('primary');
   var secondary = document.getElementById('secondary');
   var meta = document.getElementById('meta');
+  var alts = document.getElementById('alts');
 
   /** Apple Silicon detection, Rosetta included (translated JS reports Intel). */
   function isAppleSilicon() {
@@ -363,44 +373,54 @@
     return navigator.hardwareConcurrency >= 8 ? true : null;
   }
 
-  // Deliberately no file size on the button: a three-digit number reads as a
-  // warning and puts people off before they have any reason to care.
+  // Deliberately no file size anywhere on this page: a three-digit number reads
+  // as a warning and puts people off before they have any reason to care.
 
-  /** Minimal, defensive parse of the fields we need out of latest-mac.yml. */
+  /** Minimal, defensive parse of the fields we need out of an update feed. */
   function parseFeed(text) {
     var version = (/^version:\s*(.+)$/m.exec(text) || [])[1];
     if (!version) throw new Error('no version in feed');
     version = version.trim().replace(/^['"]|['"]$/g, '');
-    var files = [], re = /-\s*url:\s*(\S+)[\s\S]*?size:\s*(\d+)/g, m;
-    while ((m = re.exec(text)) !== null) files.push({ url: m[1], size: +m[2] });
+    var files = [], re = /-\s*url:\s*(\S+)/g, m;
+    while ((m = re.exec(text)) !== null) files.push({ url: m[1] });
     return { version: version, files: files };
   }
 
-  function pick(files, wantArm) {
-    for (var i = 0; i < files.length; i++) {
-      var f = files[i];
-      if (!/\.dmg$/i.test(f.url)) continue;
-      if (/arm64/i.test(f.url) === wantArm) return f;
+  // What a human can actually install, keyed off the artifact name alone. The
+  // download list is derived from this table rather than hand-placed into
+  // buttons, so a new target (another arch, another OS) becomes reachable by
+  // adding one row — it can never end up built-but-invisible.
+  var KINDS = [
+    { os: 'mac', test: /arm64\.dmg$/i,   label: 'Apple 芯片版',   need: 'macOS 11+' },
+    { os: 'mac', test: /x64\.dmg$/i,     label: 'Intel 芯片版',   need: 'macOS 11+' },
+    { os: 'win', test: /Setup.*\.exe$/i, label: 'Windows 安装版', need: 'Windows 10+' },
+    { os: 'win', test: /\.exe$/i,        label: 'Windows 免安装版', need: 'Windows 10+' }
+  ];
+
+  /** Feed files → installable variants, in KINDS order, deduped by artifact. */
+  function variants(files) {
+    var out = [], taken = {};
+    for (var k = 0; k < KINDS.length; k++) {
+      for (var i = 0; i < files.length; i++) {
+        var url = files[i].url;
+        if (taken[url] || !KINDS[k].test.test(url)) continue;
+        taken[url] = 1;
+        out.push({ os: KINDS[k].os, label: KINDS[k].label, need: KINDS[k].need, url: url });
+      }
     }
+    return out;
+  }
+
+  function visitorOS() {
+    var s = navigator.userAgent || navigator.platform || '';
+    if (/Windows|Win32|Win64/i.test(s)) return 'win';
+    if (/Mac/i.test(s)) return 'mac';
     return null;
   }
 
-  /** The Windows installer, ignoring the portable build. */
-  function pickWindows(files) {
-    for (var i = 0; i < files.length; i++) {
-      var u = files[i].url;
-      if (/\.exe$/i.test(u) && !/portable/i.test(u)) return files[i];
-    }
-    return null;
-  }
-
-  function isWindows() {
-    return /Windows|Win32|Win64/i.test(navigator.userAgent || navigator.platform || '');
-  }
-
-  function setLink(el, label, file) {
-    el.textContent = label;
-    el.href = BASE + file.url;
+  function setLink(el, v) {
+    el.textContent = '下载 ' + v.label;
+    el.href = BASE + v.url;
     el.setAttribute('download', '');
     el.removeAttribute('aria-disabled');
     el.hidden = false;
@@ -412,44 +432,45 @@
     primary.removeAttribute('aria-disabled');
     primary.removeAttribute('download');
     secondary.hidden = true;
+    alts.hidden = true;
     meta.textContent = msg;
   }
 
   function render(feed) {
-    var arm = pick(feed.files, true);
-    var intel = pick(feed.files, false);
-    var win = pickWindows(feed.files);
-    if (!arm && !intel && !win) throw new Error('no installer in feed');
+    var all = variants(feed.files);
+    if (!all.length) throw new Error('no installer in feed');
 
-    // Windows visitors get the Windows build up front, with the Mac builds
-    // still reachable — and vice versa.
-    if (isWindows() && win) {
-      setLink(primary, '下载 Windows 版', win);
-      if (arm) setLink(secondary, '下载 Mac 版（Apple 芯片）', arm);
-      else secondary.hidden = true;
-      meta.innerHTML = '版本 <b>' + feed.version + '</b> · Windows 10+';
-      return true;
-    }
-
+    var os = visitorOS();
     var silicon = isAppleSilicon();
-    // Unknown chip (or not a Mac) → lead with Apple Silicon, the common case,
-    // but keep the other builds one click away rather than hiding them.
-    var lead = (silicon !== false ? arm : intel) || arm || intel;
-    var other = lead === arm ? intel : arm;
-    if (!lead && win) {
-      setLink(primary, '下载 Windows 版', win);
-      secondary.hidden = true;
-      meta.innerHTML = '版本 <b>' + feed.version + '</b> · Windows 10+';
-      return true;
+    var mine = all.filter(function (v) { return v.os === os; });
+    // Not a platform we ship, or none matched → lead with the Mac build, the
+    // common case; everything else still shows up in the alternates row.
+    if (!mine.length) mine = all.filter(function (v) { return v.os === 'mac'; });
+    if (!mine.length) mine = all.slice();
+
+    // On a Mac, put the chip we detected first; Rosetta and unknown chips fall
+    // back to Apple Silicon, which is the majority.
+    if (os === 'mac' && silicon === false) {
+      mine = mine.slice().sort(function (a, b) { return /Intel/.test(b.label) - /Intel/.test(a.label); });
     }
 
-    setLink(primary, '下载 ' + (lead === arm ? 'Apple 芯片' : 'Intel 芯片') + '版', lead);
-    if (other) setLink(secondary, '下载 ' + (other === arm ? 'Apple 芯片' : 'Intel 芯片') + '版', other);
-    else if (win) setLink(secondary, '下载 Windows 版', win);
-    else secondary.hidden = true;
+    setLink(primary, mine[0]);
+    if (mine[1]) setLink(secondary, mine[1]); else secondary.hidden = true;
 
-    var note = silicon === null ? '未能识别芯片，已默认 Apple 芯片版' : '';
-    meta.innerHTML = '版本 <b>' + feed.version + '</b> · macOS 11+' + (note ? ' · ' + note : '');
+    // Everything not already on a button — the whole point is that no build is
+    // invisible just because the visitor is on another platform.
+    var rest = all.filter(function (v) { return v !== mine[0] && v !== mine[1]; });
+    if (rest.length) {
+      alts.innerHTML = '其他平台：' + rest.map(function (v) {
+        return '<a href="' + BASE + v.url + '" download>' + v.label + '</a>';
+      }).join('<span class="sep">·</span>');
+      alts.hidden = false;
+    } else {
+      alts.hidden = true;
+    }
+
+    var note = (os === 'mac' && silicon === null) ? ' · 未能识别芯片，已默认 Apple 芯片版' : '';
+    meta.innerHTML = '版本 <b>' + feed.version + '</b> · ' + mine[0].need + note;
     return true;
   }
 
@@ -461,12 +482,26 @@
   var rendered = safeRender(BAKED);
   if (!rendered) degrade('正在获取版本信息…');
 
-  fetch(FEED, { cache: 'no-store' })
-    .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
-    .then(function (text) { safeRender(parseFeed(text)); })
-    .catch(function (err) {
-      if (!rendered) degrade('暂时无法获取最新版本信息（' + err.message + '）');
-    });
+  // Refresh from the live feeds. Both are fetched and unioned: rendering from
+  // one alone would drop the other platform's builds off an already-correct
+  // page. A feed that fails is simply left out, never fatal.
+  Promise.all(FEEDS.map(function (url) {
+    return fetch(url, { cache: 'no-store' })
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+      .then(parseFeed)
+      .catch(function () { return null; });
+  })).then(function (feeds) {
+    var live = feeds.filter(Boolean);
+    if (!live.length) {
+      if (!rendered) degrade('暂时无法获取最新版本信息');
+      return;
+    }
+    // Same version across feeds in a normal release; if they ever disagree,
+    // trust the one the visitor's own platform would install from.
+    var merged = { version: live[0].version, files: [] };
+    live.forEach(function (f) { merged.files = merged.files.concat(f.files); });
+    safeRender(merged);
+  });
 })();
 </script>
 

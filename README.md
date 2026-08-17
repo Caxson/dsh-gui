@@ -1,6 +1,7 @@
 # Dsh GUI
 
-**A Codex-like macOS desktop app for [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness).**
+**A Codex-like desktop app for [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness)** —
+macOS first (Apple Silicon + Intel, signed and notarized), with a Windows build alongside it.
 
 The DSH engine is the kernel; this app is a plugin layer on top of it — no fork,
 no engine changes. The official `@deepseek-ai/dsh` package is bundled as-is and
@@ -37,9 +38,11 @@ injected through DSH's own plugin/patch system.
 > The Windows build is not yet verified on real hardware and is unsigned;
 > SmartScreen warns on first run — choose "More info → Run anyway".
 
-1. 从[下载页](https://dsh.merefusion.com)（自动识别芯片）或
-   [Releases](https://github.com/Caxson/dsh-gui/releases) 下载对应的
-   `Dsh-GUI-<版本>-arm64.dmg` / `Dsh-GUI-<版本>-x64.dmg`
+1. 从[下载页](https://dsh.merefusion.com)（自动识别系统与芯片，其他平台的包也在同一处列出）
+   或 [Releases](https://github.com/Caxson/dsh-gui/releases) 下载对应的
+   `Dsh-GUI-<版本>-arm64.dmg` / `Dsh-GUI-<版本>-x64.dmg`；
+   Windows 为 `Dsh-GUI-Setup-<版本>-x64.exe`（安装版）或
+   `Dsh-GUI-Portable-<版本>-x64.exe`（免安装版）
 2. 双击打开，把 **Dsh GUI** 拖进「应用程序」
 3. 首次打开：Gatekeeper 会弹一次确认框，点「打开」即可（见下方说明）
 4. 打开后进入 **设置 → 模型** 填入 DeepSeek（或任意 OpenAI 兼容）API Key，开聊

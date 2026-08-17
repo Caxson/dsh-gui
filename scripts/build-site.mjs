@@ -29,13 +29,17 @@ function parseFeed(text) {
   const version = /^version:\s*(.+)$/m.exec(text)?.[1]?.trim().replace(/^['"]|['"]$/g, '')
   if (!version) throw new Error('no `version:` field in the feed')
   const files = []
-  const re = /-\s*url:\s*(\S+)[\s\S]*?size:\s*(\d+)/g
+  const re = /-\s*url:\s*(\S+)/g
   let m
   while ((m = re.exec(text)) !== null) {
     // The mirror stores artifacts under the dashed name (electron-builder
     // names the files after the product, "Dsh GUI-…", but writes dashed URLs
     // into the feed). Normalize so the page's links resolve either way.
-    files.push({ url: m[1].replace(/ /g, '-'), size: Number(m[2]) })
+    //
+    // Sizes are deliberately not carried into the page — it never shows them,
+    // and baking them in would only put a three-digit megabyte number into the
+    // page source for no purpose.
+    files.push({ url: m[1].replace(/ /g, '-') })
   }
   if (files.length === 0) throw new Error('no files listed in the feed')
   return { version, files }
