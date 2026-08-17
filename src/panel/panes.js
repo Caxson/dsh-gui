@@ -18,6 +18,35 @@
     return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
   }
 
+  const REF_FAILURE = {
+    'no-composer': '没找到输入框，先打开一个会话',
+    'not-editable': '输入框未就绪，先选择工作区',
+    'no-view': '聊天视图未就绪',
+  };
+
+  /**
+   * Hand a reference to the chat composer and say what happened on the row
+   * itself — a silent no-op is indistinguishable from a broken button.
+   */
+  async function sendRef(text, anchor) {
+    const mark = (cls, label) => {
+      if (!anchor) return;
+      anchor.classList.remove('ref-ok', 'ref-bad');
+      anchor.classList.add(cls);
+      if (label) anchor.title = label;
+      setTimeout(() => anchor.classList.remove(cls), 1400);
+    };
+    try {
+      const res = await window.dshPanel.composeInsert(text);
+      window.__lastRef = res; // read by the smoke probe
+      if (res && res.ok) mark('ref-ok', '已加入输入框');
+      else mark('ref-bad', REF_FAILURE[res && res.reason] || `未能加入输入框：${res && res.reason}`);
+    } catch (err) {
+      window.__lastRef = { ok: false, reason: err.message };
+      mark('ref-bad', `未能加入输入框：${err.message}`);
+    }
+  }
+
   const ACTION_LABEL = {
     edit: '修改', create: '新建', write: '写入', insert: '插入',
     search: '搜索', fetch: '抓取',
@@ -243,13 +272,8 @@
     const open = new Set(); // directories the user has expanded, by relative path
 
     async function list(path) {
-      const res = await fetch('/dsh-gui/files/list', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path, showAll }),
-      });
-      const data = await res.json();
-      if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+      const data = await window.dshPanel.filesList(path, showAll);
+      if (!data || data.error) throw new Error((data && data.error) || '无响应');
       return data;
     }
 
@@ -262,6 +286,18 @@
       if (entry.hidden) r.classList.add('is-hidden-entry');
       r.append(chev, icon, name);
       if (!entry.dir && entry.size) r.appendChild(el('span', 'tree-size', fmtSize(entry.size)));
+
+      // Reference this path in the chat. Directories already use the row click
+      // to expand, so the button carries the action for every row rather than
+      // giving files a click meaning that folders cannot have.
+      const ref = el('button', 'tree-ref', '@');
+      ref.title = '在对话中引用它';
+      ref.addEventListener('click', (ev) => {
+        ev.stopPropagation(); // never also toggle the folder
+        sendRef(`@${path}`, ref);
+      });
+      r.appendChild(ref);
+
       r.title = path;
       return { r, chev };
     }
@@ -279,6 +315,14 @@
         data = await list(path);
       } catch (err) {
         into.appendChild(el('div', 'tree-error', `读取失败: ${err.message}`));
+        return;
+      }
+      if (data.waiting) {
+        // No session yet, so no workspace to show. Say what unlocks it rather
+        // than leaving an empty box; the tree loads itself once one starts.
+        title.textContent = '文件树';
+        sub.textContent = '';
+        into.appendChild(el('div', 'tree-empty', '开始一个会话后，这里显示它的工作区'));
         return;
       }
       if (depth === 0) {
@@ -333,12 +377,25 @@
     });
 
     let loaded = false;
+    let knownRoot = null;
     return {
       type: 'tree', el: root,
       onShow() {
         if (loaded) return;
         loaded = true;
         reload();
+      },
+      /**
+       * The workspace only becomes known once a session starts, and it changes
+       * when the user switches to a session in another directory. Reload on
+       * both, so the tree is never quietly showing somewhere else's files or
+       * an empty state that is no longer true.
+       */
+      onState(state) {
+        const cwd = (state && state.cwd) || null;
+        if (cwd === knownRoot) return;
+        knownRoot = cwd;
+        if (loaded) reload();
       },
       onResize() {}, dispose() {},
     };

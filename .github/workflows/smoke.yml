@@ -33,9 +33,10 @@ jobs:
         run: npm ci
 
       - name: Run end-to-end smoke
-        # Fresh isolated home; the probe exercises engine boot, the shared
-        # PTY chain, the browser tab loop, and panel layout.
-        run: |
-          DSH_GUI_USER_DATA="$RUNNER_TEMP/ud" DSH_GUI_HOME="$RUNNER_TEMP/home" npm run smoke | tee smoke.log
-          grep -q '"ptyProbe":"ok"' smoke.log
-          grep -q '"layoutProbe":"ok"' smoke.log
+        # The runner isolates the app's user data and DSH home itself, seeds a
+        # workspace + session so the workspace-derived panes have something to
+        # show, and fails unless every probe reported ok — engine boot, the
+        # shared PTY chain, the browser tab loop, panel layout, and the
+        # panel→composer backflow. Asserting lives in the runner rather than in
+        # greps here, so a local run cannot pass on weaker terms than CI.
+        run: npm run smoke

@@ -202,6 +202,9 @@ window.dshPanel.onState((s) => {
     s.cwd && s.home && s.cwd.startsWith(s.home) ? `~${s.cwd.slice(s.home.length)}` : s.cwd ?? '';
   for (const tab of tabs) {
     if (tab.type === 'terminal' && tab.pane.ptyId === 'agent') tab.pane.setCwd(cwdText);
+    // Panes that track the workspace itself (the file tree) need every state,
+    // not just the ones that changed the activity list below.
+    if (tab.pane.onState) tab.pane.onState(s);
   }
   const acts = s.activities ?? [];
   const last = acts[acts.length - 1];
@@ -261,5 +264,21 @@ window.__panelProbe = {
       emptyVisible: empty !== null && empty.style.display !== 'none',
       bar: bar === null ? '' : bar.textContent,
     };
+  },
+  /**
+   * Exercise the backflow the way a user does — click the reference button on
+   * the first tree row — and report which path was sent, so the smoke run can
+   * then assert the engine's composer actually received it.
+   */
+  treeRefFirst() {
+    const row = document.querySelector('.tree-row');
+    const btn = row && row.querySelector('.tree-ref');
+    if (!btn) return { clicked: false, reason: 'no tree row rendered yet' };
+    btn.click();
+    return { clicked: true, path: row.title };
+  },
+  /** What the last reference attempt reported back from the main process. */
+  lastRef() {
+    return window.__lastRef ?? null;
   },
 };
