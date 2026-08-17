@@ -270,6 +270,10 @@ window.__panelProbe = {
    * the first tree row — and report which path was sent, so the smoke run can
    * then assert the engine's composer actually received it.
    */
+  /** How many tree rows are on screen — polled, since listing is async. */
+  treeRowCount() {
+    return document.querySelectorAll('.tree-row').length;
+  },
   treeRefFirst() {
     const row = document.querySelector('.tree-row');
     const btn = row && row.querySelector('.tree-ref');

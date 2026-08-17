@@ -812,7 +812,17 @@ function createWindow() {
                 // the DOM while the engine still believes the box is empty,
                 // which is exactly the failure mode this path has to avoid.
                 await panelView.webContents.executeJavaScript(`__panelProbe.open('tree')`);
-                await new Promise((r) => setTimeout(r, 1200));
+                // Wait for the listing rather than guessing how long it takes:
+                // a fixed delay passes on this machine and fails on a slower
+                // runner, which is worse than failing outright because it makes
+                // the probe flaky instead of informative.
+                for (let i = 0; i < 40; i++) {
+                  const rows = await panelView.webContents.executeJavaScript(
+                    `__panelProbe.treeRowCount()`,
+                  );
+                  if (rows > 0) break;
+                  await new Promise((r) => setTimeout(r, 250));
+                }
                 // Which controls are disabled right now. The engine enables its
                 // send control once it believes the composer is non-empty, so
                 // the transition is the proof that the text was accepted —
@@ -824,11 +834,7 @@ function createWindow() {
                 const ref = await panelView.webContents.executeJavaScript(
                   `__panelProbe.treeRefFirst()`,
                 );
-                await new Promise((r) => setTimeout(r, 800));
-                const refResult = await panelView.webContents.executeJavaScript(
-                  `__panelProbe.lastRef()`,
-                );
-                const composer = await mainView.webContents.executeJavaScript(`(() => {
+                const readComposer = `(() => {
                   const vis = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
                   const ta = [...document.querySelectorAll('textarea')].filter(vis)
                     .sort((a, b) => {
@@ -836,7 +842,18 @@ function createWindow() {
                       return rb.width * rb.height - ra.width * ra.height;
                     })[0];
                   return { value: ta ? ta.value : null, readOnly: ta ? ta.readOnly : null };
-                })()`, true);
+                })()`;
+                // Poll for the text instead of assuming a round trip and a
+                // React render fit in a fixed delay.
+                let composer = null;
+                for (let i = 0; i < 20; i++) {
+                  composer = await mainView.webContents.executeJavaScript(readComposer, true);
+                  if (ref.clicked && composer.value && composer.value.includes(ref.path)) break;
+                  await new Promise((r) => setTimeout(r, 250));
+                }
+                const refResult = await panelView.webContents.executeJavaScript(
+                  `__panelProbe.lastRef()`,
+                );
                 const after = await mainView.webContents.executeJavaScript(disabledMap, true);
                 // Some control must have gone from disabled to enabled. Compare
                 // position-wise when the button set is unchanged; otherwise fall
