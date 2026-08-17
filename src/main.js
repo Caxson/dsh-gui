@@ -813,6 +813,14 @@ function createWindow() {
                 // which is exactly the failure mode this path has to avoid.
                 await panelView.webContents.executeJavaScript(`__panelProbe.open('tree')`);
                 await new Promise((r) => setTimeout(r, 1200));
+                // Which controls are disabled right now. The engine enables its
+                // send control once it believes the composer is non-empty, so
+                // the transition is the proof that the text was accepted —
+                // identified by that state change rather than by a label, which
+                // is localized (the CI runner speaks English, this machine does
+                // not) or by a class name, which is content hashed.
+                const disabledMap = `(() => [...document.querySelectorAll('button')].map((b) => b.disabled))()`;
+                const before = await mainView.webContents.executeJavaScript(disabledMap, true);
                 const ref = await panelView.webContents.executeJavaScript(
                   `__panelProbe.treeRefFirst()`,
                 );
@@ -827,24 +835,28 @@ function createWindow() {
                       const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
                       return rb.width * rb.height - ra.width * ra.height;
                     })[0];
-                  const send = [...document.querySelectorAll('button')]
-                    .find((b) => (b.getAttribute('aria-label') || '').includes('发送'));
-                  return {
-                    value: ta ? ta.value : null,
-                    readOnly: ta ? ta.readOnly : null,
-                    sendDisabled: send ? send.disabled : null,
-                  };
+                  return { value: ta ? ta.value : null, readOnly: ta ? ta.readOnly : null };
                 })()`, true);
+                const after = await mainView.webContents.executeJavaScript(disabledMap, true);
+                // Some control must have gone from disabled to enabled. Compare
+                // position-wise when the button set is unchanged; otherwise fall
+                // back to "fewer are disabled than before".
+                const countDisabled = (list) => list.filter(Boolean).length;
+                const enabledSomething =
+                  before.length === after.length
+                    ? before.some((wasDisabled, i) => wasDisabled && !after[i])
+                    : countDisabled(after) < countDisabled(before);
+
                 // A pass means the engine agrees the text is there: the value
-                // carries the referenced path AND the send button left its
-                // disabled state. Value alone is not enough — that is exactly
-                // what a naive .value assignment produces while the engine
-                // still treats the composer as empty.
+                // carries the referenced path AND a control left its disabled
+                // state. Value alone is not enough — that is exactly what a
+                // plain .value assignment produces while the engine still
+                // treats the composer as empty.
                 const backflowProbe = !ref.clicked
                   ? `see:${ref.reason} (seed:${smokeSeed})`
-                  : composer.value && composer.value.includes(ref.path) && composer.sendDisabled === false
+                  : composer.value && composer.value.includes(ref.path) && enabledSomething
                     ? 'ok'
-                    : `see:${JSON.stringify({ ref, refResult, composer, seed: smokeSeed })}`;
+                    : `see:${JSON.stringify({ ref, refResult, composer, before, after, seed: smokeSeed })}`;
 
                 // layout probe: the panel must take space from the window,
                 // never overlay the main view (Codex-style reallocation)
