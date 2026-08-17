@@ -831,6 +831,7 @@ body {
   transition: opacity .12s ease, background .12s ease, color .12s ease;
 }
 .tree-row:hover .tree-ref,
+.file-head:hover .card-ref,
 .tree-ref:focus-visible { opacity: 1; }
 .tree-ref:hover { background: var(--bg-3); color: var(--text); }
 .tree-ref.ref-ok { opacity: 1; background: rgba(64, 160, 96, .22); color: #7fd39b; }
