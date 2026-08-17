@@ -82,6 +82,14 @@ nsis:
   # Keeping the shortcut name in sync with the product avoids two entries in
   # the Start menu after a rename.
   shortcutName: Dsh GUI
+  # Both Windows targets emit .exe, so the global artifactName below would give
+  # them the same filename and the second build would silently overwrite the
+  # first — leaving the update feed pointing at a file that no longer exists.
+  # Name them apart.
+  artifactName: "${productName}-Setup-${version}-${arch}.${ext}"
+
+portable:
+  artifactName: "${productName}-Portable-${version}-${arch}.${ext}"
 
 # Self-update feed: GitHub Releases is the canonical channel (electron-builder
 # embeds it into app-update.yml and generates latest-mac.yml next to the zip).
