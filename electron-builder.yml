@@ -55,10 +55,9 @@ mac:
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
   notarize: true
-  # Architecture comes from the CLI (`--arm64` / `--x64`). The app bundles a
-  # Chromium build for the browser pane and Chromium is architecture-specific,
-  # so each arch is built on a runner of that architecture and the resulting
-  # feeds are merged (scripts/merge-mac-feed.mjs).
+  # Architecture comes from the CLI (`--arm64` / `--x64`). Each arch is built on
+  # a runner of that architecture and the resulting feeds are merged
+  # (scripts/merge-mac-feed.mjs).
   target:
     - target: dmg
     # The zip + latest-mac.yml are what the app's built-in auto-updater uses.

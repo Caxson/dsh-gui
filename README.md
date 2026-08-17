@@ -15,8 +15,10 @@ injected through DSH's own plugin/patch system.
 - 🖥️ 原生 macOS 窗口，深色 Codex 风格；完整 DSH 能力（多会话、工具调用、工作区、Goal、子代理）
 - 📋 **Codex 式右侧面板**（Cmd+B 呼出，默认隐藏；浏览器式多标签，可新建/关闭/弹出为独立窗口）：
   - **终端** — 与 agent 共享同一个 PTY（agent 跑的每条命令实时可见），可再开多个本地终端标签（⌘T）
-  - **文件** — 改动按文件聚合成卡片，真·逐行 diff（LCS + 上下文折叠）、+N/−N 统计、展开/收起（⌘P）
-  - **浏览器** — agent 驱动的无头 Chromium 实时画面 + 搜索/抓取活动流
+  - **改动** — 改动按文件聚合成卡片，真·逐行 diff（LCS + 上下文折叠）、+N/−N 统计、展开/收起（⌘P）
+  - **文件树** — 工作区目录树，按需逐层展开，生成目录默认折叠（⌘E）
+  - **浏览器** — agent 驱动的无头 Chromium 实时画面 + 搜索/抓取活动流（Chromium 不随包分发，
+    首次打开该标签时按提示下载，优先走国内镜像；下载后随用户数据保留，不会被更新覆盖）
   - **侧边聊天** — 临时轻量聊天（⌥⌘S），流式回复，关闭应用即消失，不打扰主会话
 - 🔌 桌面行为全部以 DSH 插件（profile patch overlay）实现：`bridge/`（活动采集 + 共享 PTY + `terminal_send` 工具）、`browser/`（实时浏览器）
 - 🔒 引擎只绑定 127.0.0.1，外部链接自动走系统浏览器
@@ -89,9 +91,10 @@ plugins/desktop.patch.yml   挂到 web profile 的 loader patch 覆盖层
 ## 发版 / Release
 
 `package.json` 改版本号 → 打 `vX.Y.Z` tag 推送到 GitHub，Actions 云构建自动
-发版：依赖闭包 + 文档一致性校验 → dmg + zip（arm64）→ Apple Developer ID
-签名 + 公证 → 挂到 GitHub Releases 并同步 OSS 镜像，老用户自动更新；大陆
-用户可用 `DSH_GUI_UPDATE_URL` 指向镜像源。
+发版：依赖闭包 + 文档一致性校验 → macOS dmg + zip（arm64 与 x64 各自在对应
+架构的 runner 上构建）与 Windows 安装版 + 免安装版 → Apple Developer ID
+签名 + 公证（仅 macOS）→ 挂到 GitHub Releases 并同步 OSS 镜像，老用户自动
+更新；大陆用户可用 `DSH_GUI_UPDATE_URL` 指向镜像源。
 未配置签名 secrets 时（如 fork），构建自动退回未签名版——功能不受影响，
 只是首次打开需右键 →「打开」。
 Releases are built on GitHub Actions with Developer ID signing +
