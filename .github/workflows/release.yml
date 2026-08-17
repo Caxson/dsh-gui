@@ -2,10 +2,9 @@
 # artifacts to a Release — publishing never depends on the maintainer's local
 # uplink.
 #
-# The app bundles a Chromium build for the browser pane, and Chromium is
-# architecture-specific, so each arch is built on a runner of that architecture
-# (macos-14 = Apple Silicon, macos-13 = Intel) and the two update feeds are
-# merged into one that serves both.
+# Electron itself is architecture-specific, so each arch is built on a runner of
+# that architecture (macos-14 = Apple Silicon, macos-15-intel = Intel) and the
+# two update feeds are merged into one that serves both.
 #
 # Trigger: push a tag like v1.2.0, or run manually with a tag input.
 name: release
