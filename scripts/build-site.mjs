@@ -1,76 +1,75 @@
 #!/usr/bin/env node
 /**
- * build-site — bake the current release feed into the download page.
+ * build-site — bake the current release into the download page.
  *
- * site/index.html reads the update feed at load time so an already-deployed
- * page picks up new releases on its own. That fetch is cross-origin whenever
- * the page and the artifacts are not served from the same host, and browsers
- * block it unless CORS is configured — so the page must not depend on it.
+ * The page is rebuilt and re-uploaded on every release (and served no-cache),
+ * so what is baked here is what visitors get; the page does no network work of
+ * its own. That is deliberate: fetching the update feed at load time made the
+ * page depend on a cross-origin request, and — worse — the feed is not the list
+ * a human wants.
  *
- * This script reads a latest-mac.yml (the one produced by the release build)
- * and inlines version + file list into the page, making the live fetch a pure
- * enhancement instead of a requirement.
+ * The update feed and the download page describe different sets:
  *
- * Usage: node scripts/build-site.mjs <latest-mac.yml> [out.html] [latest.yml]
+ *   - the feed carries what electron-updater needs (the mac .zip; only one
+ *     Windows target, since a portable .exe cannot update itself in place)
+ *   - the page carries what a person installs (.dmg, both .exe flavours)
  *
- * The optional third argument is the Windows feed; its files are folded into
- * the same list so the page can offer a Windows download too.
+ * Deriving the page from the feed therefore hid the portable build even though
+ * it was published. So the page is built from the artifacts actually being
+ * released, and the feed is consulted only for the version number.
+ *
+ * Usage: node scripts/build-site.mjs <artifactsDir> [out.html]
  */
 
-import { readFileSync, writeFileSync, mkdirSync, cpSync, existsSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync, cpSync, existsSync, readdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const MARKER = /\/\*__FEED__\*\/[\s\S]*?\/\*__FEED__\*\//
 
-/** electron-builder's latest-mac.yml → { version, files: [{url, size}] }. */
-function parseFeed(text) {
-  const version = /^version:\s*(.+)$/m.exec(text)?.[1]?.trim().replace(/^['"]|['"]$/g, '')
-  if (!version) throw new Error('no `version:` field in the feed')
-  const files = []
-  const re = /-\s*url:\s*(\S+)/g
-  let m
-  while ((m = re.exec(text)) !== null) {
-    // The mirror stores artifacts under the dashed name (electron-builder
-    // names the files after the product, "Dsh GUI-…", but writes dashed URLs
-    // into the feed). Normalize so the page's links resolve either way.
-    //
-    // Sizes are deliberately not carried into the page — it never shows them,
-    // and baking them in would only put a three-digit megabyte number into the
-    // page source for no purpose.
-    files.push({ url: m[1].replace(/ /g, '-') })
+// Update feeds and their checksum sidecars are machinery, not downloads.
+const NOT_A_DOWNLOAD = /(\.blockmap|\.ya?ml)$/i
+// What a person can actually install. The page classifies these further; here
+// we only need to keep machinery out.
+const INSTALLABLE = /\.(dmg|exe)$/i
+
+/** The version every artifact in this release shares, per the update feeds. */
+function versionFrom(dir) {
+  const feeds = readdirSync(dir).filter((f) => /^latest.*\.ya?ml$/i.test(f))
+  const found = new Set()
+  for (const f of feeds) {
+    const m = /^version:\s*(.+)$/m.exec(readFileSync(join(dir, f), 'utf8'))
+    if (m) found.add(m[1].trim().replace(/^['"]|['"]$/g, ''))
   }
-  if (files.length === 0) throw new Error('no files listed in the feed')
-  return { version, files }
+  if (found.size === 0) throw new Error(`no version found in any feed under ${dir}`)
+  // Feeds disagreeing means the release is half-built; do not paper over it by
+  // picking one and advertising downloads from two different versions.
+  if (found.size > 1) throw new Error(`feeds disagree on the version: ${[...found].join(', ')}`)
+  return [...found][0]
 }
 
 function main() {
-  const [feedPath, outPath = join(ROOT, 'dist-site', 'index.html'), winFeedPath] = process.argv.slice(2)
-  if (!feedPath) {
-    console.error('usage: node scripts/build-site.mjs <latest-mac.yml> [out.html]')
+  const [dir, outPath = join(ROOT, 'dist-site', 'index.html')] = process.argv.slice(2)
+  if (!dir) {
+    console.error('usage: node scripts/build-site.mjs <artifactsDir> [out.html]')
     process.exit(2)
   }
 
-  const feed = parseFeed(readFileSync(feedPath, 'utf8'))
+  const version = versionFrom(dir)
+  const files = readdirSync(dir)
+    .filter((f) => !NOT_A_DOWNLOAD.test(f) && INSTALLABLE.test(f))
+    // The mirror stores artifacts under the dashed name (electron-builder names
+    // files after the product, "Dsh GUI-…"), so link them that way.
+    .map((f) => ({ url: f.replace(/ /g, '-') }))
+    .sort((a, b) => a.url.localeCompare(b.url))
 
-  // Windows publishes its own feed; fold its files in so one page can serve
-  // both platforms. A missing or unreadable Windows feed simply means no
-  // Windows button, never a failed build.
-  if (winFeedPath && existsSync(winFeedPath)) {
-    try {
-      const win = parseFeed(readFileSync(winFeedPath, 'utf8'))
-      const seen = new Set(feed.files.map((f) => f.url))
-      for (const f of win.files) if (!seen.has(f.url)) feed.files.push(f)
-    } catch (err) {
-      console.warn(`! ignoring Windows feed: ${err.message}`)
-    }
-  }
+  if (files.length === 0) throw new Error(`no installable artifacts in ${dir}`)
 
   const page = readFileSync(join(ROOT, 'site', 'index.html'), 'utf8')
   if (!MARKER.test(page)) throw new Error('site/index.html has no /*__FEED__*/ marker to fill')
 
-  const baked = page.replace(MARKER, `/*__FEED__*/${JSON.stringify(feed)}/*__FEED__*/`)
+  const baked = page.replace(MARKER, `/*__FEED__*/${JSON.stringify({ version, files })}/*__FEED__*/`)
   const outDir = dirname(outPath)
   mkdirSync(outDir, { recursive: true })
   writeFileSync(outPath, baked)
@@ -80,9 +79,8 @@ function main() {
   const assets = join(ROOT, 'site', 'assets')
   if (existsSync(assets)) cpSync(assets, join(outDir, 'assets'), { recursive: true })
 
-  const dmgs = feed.files.filter((f) => f.url.endsWith('.dmg')).map((f) => f.url)
-  console.log(`✓ site built for ${feed.version} → ${outPath}`)
-  console.log(`  dmg: ${dmgs.length ? dmgs.join(', ') : '(none — page will link GitHub Releases)'}`)
+  console.log(`✓ site built for ${version} → ${outPath}`)
+  for (const f of files) console.log(`  offers ${f.url}`)
 }
 
 main()

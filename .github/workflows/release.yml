@@ -200,8 +200,18 @@ jobs:
           cat out/latest-mac.yml
           ls -la out
 
+      # Before anything is published: does each feed describe the file that was
+      # actually built? A filename collision between two targets shows up here,
+      # while the release can still be stopped — and this runs even on forks,
+      # where the mirror steps are skipped.
+      - name: Verify the release is internally consistent
+        run: node scripts/verify-downloads.mjs out
+
+      # Built from the artifacts actually being released, not from the update
+      # feeds: the feeds list what the updater needs (mac .zip, installer only)
+      # while the page lists what a person installs (.dmg, both .exe flavours).
       - name: Build the download page
-        run: node scripts/build-site.mjs out/latest-mac.yml dist-site/index.html out/latest.yml
+        run: node scripts/build-site.mjs out dist-site/index.html
 
       - name: Upload artifacts to the Release
         env:
@@ -275,14 +285,11 @@ jobs:
             --access-key-id "$OSS_KEY_ID" \
             --access-key-secret "$OSS_KEY_SECRET"
 
-      # Uploading is not the same as being downloadable, and being downloadable
-      # is not the same as being the right file. Two targets that collide on a
-      # filename leave every URL resolving while the feed describes an artifact
-      # the mirror no longer holds — so this checks identity (size), not just
-      # existence.
-      - name: Verify every advertised download resolves and matches the feed
+      # Uploading is not the same as being downloadable. Every artifact — the
+      # ones the feeds advertise and the ones only the download page offers —
+      # must come back from the mirror at the size it left here.
+      - name: Verify every published artifact is downloadable
         if: env.HAS_MIRROR == 'true'
         run: |
-          node scripts/verify-downloads.mjs \
-            https://merefusion-static.oss-cn-hangzhou.aliyuncs.com/dsh-gui \
-            out/latest-mac.yml out/latest.yml
+          node scripts/verify-downloads.mjs out \
+            https://merefusion-static.oss-cn-hangzhou.aliyuncs.com/dsh-gui

@@ -342,9 +342,6 @@
   // latest-mac.yml at load time means a new release is live here the moment it
   // is mirrored — the page never needs redeploying.
   var BASE = 'https://merefusion-static.oss-cn-hangzhou.aliyuncs.com/dsh-gui/';
-  // Each platform publishes its own feed; the page unions them so no build is
-  // reachable on one platform's page and invisible on another's.
-  var FEEDS = [BASE + 'latest-mac.yml', BASE + 'latest.yml'];
   var RELEASES = 'https://github.com/Caxson/dsh-gui/releases';
 
   // Baked at deploy time from the release's own latest-mac.yml (see
@@ -375,16 +372,6 @@
 
   // Deliberately no file size anywhere on this page: a three-digit number reads
   // as a warning and puts people off before they have any reason to care.
-
-  /** Minimal, defensive parse of the fields we need out of an update feed. */
-  function parseFeed(text) {
-    var version = (/^version:\s*(.+)$/m.exec(text) || [])[1];
-    if (!version) throw new Error('no version in feed');
-    version = version.trim().replace(/^['"]|['"]$/g, '');
-    var files = [], re = /-\s*url:\s*(\S+)/g, m;
-    while ((m = re.exec(text)) !== null) files.push({ url: m[1] });
-    return { version: version, files: files };
-  }
 
   // What a human can actually install, keyed off the artifact name alone. The
   // download list is derived from this table rather than hand-placed into
@@ -479,29 +466,13 @@
     catch (e) { return false; }
   }
 
-  var rendered = safeRender(BAKED);
-  if (!rendered) degrade('正在获取版本信息…');
-
-  // Refresh from the live feeds. Both are fetched and unioned: rendering from
-  // one alone would drop the other platform's builds off an already-correct
-  // page. A feed that fails is simply left out, never fatal.
-  Promise.all(FEEDS.map(function (url) {
-    return fetch(url, { cache: 'no-store' })
-      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
-      .then(parseFeed)
-      .catch(function () { return null; });
-  })).then(function (feeds) {
-    var live = feeds.filter(Boolean);
-    if (!live.length) {
-      if (!rendered) degrade('暂时无法获取最新版本信息');
-      return;
-    }
-    // Same version across feeds in a normal release; if they ever disagree,
-    // trust the one the visitor's own platform would install from.
-    var merged = { version: live[0].version, files: [] };
-    live.forEach(function (f) { merged.files = merged.files.concat(f.files); });
-    safeRender(merged);
-  });
+  // The release pipeline rebuilds and re-uploads this page (no-cache) as part
+  // of publishing, so what is baked in is always the current release. The page
+  // deliberately fetches nothing at runtime: reading the update feed live added
+  // a cross-origin dependency and, because the feed lists what the *updater*
+  // needs rather than what a person installs, it silently dropped the portable
+  // Windows build off an otherwise correct page.
+  if (!safeRender(BAKED)) degrade('前往 GitHub 查看全部下载');
 })();
 </script>
 
