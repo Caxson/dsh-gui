@@ -25,8 +25,15 @@ injected through DSH's own plugin/patch system.
 
 ## 安装 / Install
 
-> 提供 Apple Silicon (`arm64`) 与 Intel (`x64`) 两个版本，请按芯片选择。
-> Both Apple Silicon (`arm64`) and Intel (`x64`) builds are published.
+> macOS 提供 Apple Silicon (`arm64`) 与 Intel (`x64`) 两个版本，请按芯片选择；
+> Windows 提供安装版与免安装版（`x64`）。
+> macOS ships Apple Silicon (`arm64`) and Intel (`x64`); Windows ships an
+> installer and a portable build (`x64`).
+>
+> **Windows 版尚未经过真机验证，也未做代码签名**——首次运行 SmartScreen 会
+> 提示，点「更多信息 → 仍要运行」即可。欢迎反馈问题。
+> The Windows build is not yet verified on real hardware and is unsigned;
+> SmartScreen warns on first run — choose "More info → Run anyway".
 
 1. 从[下载页](https://dsh.merefusion.com)（自动识别芯片）或
    [Releases](https://github.com/Caxson/dsh-gui/releases) 下载对应的

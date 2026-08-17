@@ -54,11 +54,6 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Bundle Chromium for the browser plugin
-        # Installs the runner's native Chromium, which is exactly the arch this
-        # job packages.
-        run: PLAYWRIGHT_BROWSERS_PATH=resources/browsers npx playwright install chromium
-
       - name: Build dmg + zip (signed + notarized when secrets present)
         # With CSC_LINK (base64 Developer ID p12) + Apple notarization secrets
         # set on the repo, electron-builder signs and notarizes; without them
@@ -113,8 +108,49 @@ jobs:
           retention-days: 3
           if-no-files-found: error
 
+  # Windows is built separately rather than folded into the matrix above: it
+  # shares none of the mac signing, notarization or feed-merging steps, and
+  # keeping them apart means a Windows change cannot regress the mac release.
+  build-win:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Verify engine dependency closure + docs consistency
+        run: |
+          npm run verify:closure
+          npm run verify:docs
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build installer + portable
+        # Unsigned: Windows code signing needs a separate certificate. SmartScreen
+        # warns on first run until one is configured; the app still installs.
+        run: npx electron-builder --win --x64 --publish never
+
+      - name: Stage artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p staged
+          cp dist/*.exe dist/*.blockmap dist/latest.yml staged/ 2>/dev/null || true
+          ls -la staged
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: win-x64
+          path: staged/
+          retention-days: 3
+          if-no-files-found: error
+
   publish:
-    needs: build
+    needs: [build, build-win]
     runs-on: ubuntu-latest
     env:
       # `secrets` is not dependable inside a step-level `if`; surface the one
@@ -146,11 +182,17 @@ jobs:
             done
           done
           node scripts/merge-mac-feed.mjs out/latest-mac.yml incoming/mac-*/latest-mac.yml
+          # Windows updates through its own latest.yml — a separate channel, so
+          # it is copied across untouched rather than merged into the mac feed.
+          for d in incoming/win-*; do
+            [ -d "$d" ] || continue
+            cp "$d"/* out/
+          done
           cat out/latest-mac.yml
           ls -la out
 
       - name: Build the download page
-        run: node scripts/build-site.mjs out/latest-mac.yml dist-site/index.html
+        run: node scripts/build-site.mjs out/latest-mac.yml dist-site/index.html out/latest.yml
 
       - name: Upload artifacts to the Release
         env:
@@ -220,7 +262,8 @@ jobs:
           BASE: https://merefusion-static.oss-cn-hangzhou.aliyuncs.com/dsh-gui
         run: |
           set -euo pipefail
-          urls=$(grep -oE '^\s+- url: .+$' out/latest-mac.yml | awk '{print $3}')
+          urls=$(cat out/latest-mac.yml out/latest.yml 2>/dev/null \
+                 | grep -oE '^\s+- url: .+$' | awk '{print $3}' | sort -u)
           [ -n "$urls" ] || { echo "feed advertises no files"; exit 1; }
           fail=0
           for u in $urls; do

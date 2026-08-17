@@ -215,6 +215,135 @@
     };
   }
 
+  // ── file tree pane ────────────────────────────────────────────────────
+  /**
+   * Browse the workspace. Each directory is fetched only when it is opened,
+   * so a large repository costs nothing until someone looks inside it.
+   */
+  function createTreePane() {
+    const root = el('section', 'pane');
+
+    const head = el('div', 'tree-head');
+    const title = el('div', 'tree-title', '文件树');
+    const sub = el('div', 'tree-sub', '');
+    const actions = el('div', 'tree-actions');
+    const hiddenBtn = el('button', 'tree-btn', '⋯');
+    hiddenBtn.title = '显示被忽略的目录与隐藏文件';
+    const reloadBtn = el('button', 'tree-btn', '⟳');
+    reloadBtn.title = '刷新';
+    actions.append(hiddenBtn, reloadBtn);
+    const headText = el('div', 'tree-headtext');
+    headText.append(title, sub);
+    head.append(headText, actions);
+
+    const body = el('div', 'scroll tree-body');
+    root.append(head, body);
+
+    let showAll = false;
+    const open = new Set(); // directories the user has expanded, by relative path
+
+    async function list(path) {
+      const res = await fetch('/dsh-gui/files/list', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path, showAll }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+      return data;
+    }
+
+    function row(entry, path, depth) {
+      const r = el('div', `tree-row${entry.dir ? ' is-dir' : ''}`);
+      r.style.paddingLeft = `${8 + depth * 14}px`;
+      const chev = el('span', 'tree-chev', entry.dir ? '▸' : '');
+      const icon = el('span', 'tree-icon', entry.dir ? '📁' : '📄');
+      const name = el('span', 'tree-name', entry.name);
+      if (entry.hidden) r.classList.add('is-hidden-entry');
+      r.append(chev, icon, name);
+      if (!entry.dir && entry.size) r.appendChild(el('span', 'tree-size', fmtSize(entry.size)));
+      r.title = path;
+      return { r, chev };
+    }
+
+    function fmtSize(n) {
+      if (n < 1024) return `${n} B`;
+      if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+      return `${(n / 1048576).toFixed(1)} MB`;
+    }
+
+    /** Render one directory's children into `into`, recursing where opened. */
+    async function renderInto(into, path, depth) {
+      let data;
+      try {
+        data = await list(path);
+      } catch (err) {
+        into.appendChild(el('div', 'tree-error', `读取失败: ${err.message}`));
+        return;
+      }
+      if (depth === 0) {
+        const rootName = (data.root || '').split('/').filter(Boolean).pop() || '/';
+        title.textContent = rootName;
+        sub.textContent = `${data.total} 项${data.truncated ? '（已截断）' : ''}`;
+      }
+      if (data.entries.length === 0) {
+        into.appendChild(el('div', 'tree-empty', '空目录'));
+        return;
+      }
+      for (const entry of data.entries) {
+        const childPath = path ? `${path}/${entry.name}` : entry.name;
+        const { r, chev } = row(entry, childPath, depth);
+        into.appendChild(r);
+        if (!entry.dir) continue;
+
+        const kids = el('div', 'tree-kids');
+        kids.hidden = !open.has(childPath);
+        into.appendChild(kids);
+        if (open.has(childPath)) {
+          chev.textContent = '▾';
+          renderInto(kids, childPath, depth + 1);
+        }
+        r.addEventListener('click', async () => {
+          const nowOpen = kids.hidden;
+          kids.hidden = !nowOpen;
+          chev.textContent = nowOpen ? '▾' : '▸';
+          if (nowOpen) {
+            open.add(childPath);
+            if (kids.childElementCount === 0) await renderInto(kids, childPath, depth + 1);
+          } else {
+            open.delete(childPath);
+          }
+        });
+      }
+    }
+
+    async function reload() {
+      body.replaceChildren();
+      body.appendChild(el('div', 'tree-empty', '正在读取…'));
+      const fresh = el('div', 'tree-kids');
+      await renderInto(fresh, '', 0);
+      body.replaceChildren(fresh);
+    }
+
+    reloadBtn.addEventListener('click', reload);
+    hiddenBtn.addEventListener('click', () => {
+      showAll = !showAll;
+      hiddenBtn.classList.toggle('on', showAll);
+      reload();
+    });
+
+    let loaded = false;
+    return {
+      type: 'tree', el: root,
+      onShow() {
+        if (loaded) return;
+        loaded = true;
+        reload();
+      },
+      onResize() {}, dispose() {},
+    };
+  }
+
   // ── web pane ──────────────────────────────────────────────────────────
   function webCard(a) {
     const card = el('div', 'web-card');
@@ -250,10 +379,51 @@
     img.alt = '';
     const empty = el('div', 'empty');
     empty.id = 'browser-empty';
-    empty.appendChild(el('div', 'empty-glyph', '◐'));
-    empty.appendChild(el('div', '', '浏览器未启动'));
-    empty.appendChild(el('div', 'empty-sub', 'agent 调用 browser 工具后，这里会显示实时画面'));
+    const glyph = el('div', 'empty-glyph', '◐');
+    const title = el('div', '', '浏览器未启动');
+    const sub = el('div', 'empty-sub', 'agent 调用 browser 工具后，这里会显示实时画面');
+    // Chromium ships separately from the app; offer to fetch it rather than
+    // letting the first browser call fail with a missing-executable error.
+    const getBtn = el('button', 'empty-action', '下载浏览器组件');
+    getBtn.hidden = true;
+    const log = el('pre', 'empty-log');
+    log.hidden = true;
+    empty.append(glyph, title, sub, getBtn, log);
     view.append(img, empty);
+
+    function showNeedsInstall() {
+      title.textContent = '需要下载浏览器组件';
+      sub.textContent = '约 150MB，只需下载一次，之后浏览器功能即可使用';
+      getBtn.hidden = false;
+    }
+
+    window.dshPanel.browserStatus().then((s) => {
+      if (!s.installed) showNeedsInstall();
+    }).catch(() => { /* older shell without the check — leave the default copy */ });
+
+    window.dshPanel.onBrowserProgress((text) => {
+      log.hidden = false;
+      log.textContent = (log.textContent + text).slice(-1200);
+      log.scrollTop = log.scrollHeight;
+    });
+
+    getBtn.addEventListener('click', async () => {
+      getBtn.disabled = true;
+      getBtn.textContent = '正在下载…';
+      log.hidden = false;
+      log.textContent = '';
+      const r = await window.dshPanel.browserInstall().catch((e) => ({ ok: false, output: String(e) }));
+      if (r && r.ok) {
+        getBtn.hidden = true;
+        log.hidden = true;
+        title.textContent = '浏览器未启动';
+        sub.textContent = 'agent 调用 browser 工具后，这里会显示实时画面';
+      } else {
+        getBtn.disabled = false;
+        getBtn.textContent = '重试下载';
+        sub.textContent = '下载失败，可重试或检查网络';
+      }
+    });
     const split = el('div', 'pane-split');
     split.appendChild(el('div', 'pane-title', '活动记录'));
     const list = el('div', 'scroll');
@@ -358,5 +528,5 @@
     };
   }
 
-  window.dshPanes = { createTerminalPane, createFilesPane, createWebPane, createSidechatPane };
+  window.dshPanes = { createTerminalPane, createFilesPane, createTreePane, createWebPane, createSidechatPane };
 })();

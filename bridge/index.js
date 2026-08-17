@@ -17,6 +17,7 @@ import { defineTool } from "@deepseek-ai/dsh-tools";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { BlockAssembler, createUserMessage, createAssistantMessage, deepFreeze } from "@deepseek-ai/dsh-llm";
+import { listDirectory } from "./filetree.js";
 
 export const name = "dsh-gui-bridge";
 export const inject = ["tools", "llm"];
@@ -25,7 +26,12 @@ const require = createRequire(import.meta.url);
 const MAX_ACTIVITIES = 200;
 const URL_RE = /https?:\/\/[^\s"'<>()]+/g;
 const PTY_OUT_MAX = 400; // ring-buffer chunks per pty
-const DEFAULT_SHELL = process.env.SHELL || "/bin/zsh";
+// Windows has no $SHELL and no /bin/zsh; PowerShell is the closest equivalent
+// to what the terminal tab is for, with cmd.exe as the last resort.
+const DEFAULT_SHELL =
+  process.platform === "win32"
+    ? "powershell.exe"
+    : process.env.SHELL || "/bin/zsh";
 const AGENT_PTY = "agent";
 const PTY_ID_RE = /^[a-z0-9][a-z0-9-]{0,32}$/;
 const SIDECHAT_MAX_TOKENS = 4096;
@@ -342,6 +348,18 @@ export function apply(ctx) {
           kind: "exact",
           path: "/dsh-gui/state",
           handler: guard(async (_req, res) => json(res, { cwd, home: homedir(), activities })),
+        }),
+        httpCtx.webServer.register({
+          kind: "exact",
+          path: "/dsh-gui/files/list",
+          handler: guard(async (req, res) => {
+            const body = await readBody(req).catch(() => ({}));
+            const rows = await listDirectory(cwd, String(body.path ?? ""), {
+              showAll: body.showAll === true,
+            });
+            if (rows === null) return json(res, { error: "路径不存在或不在工作区内" }, 400);
+            json(res, { ...rows, root: cwd });
+          }),
         }),
         httpCtx.webServer.register({
           kind: "exact",

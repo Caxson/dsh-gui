@@ -164,7 +164,8 @@ function detectCwd(path) {
   }
   const findCwd = (node, depthLeft = 4) => {
     if (node === null || typeof node !== 'object' || depthLeft < 0) return ''
-    if (typeof node.cwd === 'string' && node.cwd.startsWith('/')) return node.cwd
+    // Absolute either way: POSIX "/work" or Windows "C:\work" / "\\server\share".
+    if (typeof node.cwd === 'string' && /^([/\\]|[A-Za-z]:[/\\])/.test(node.cwd)) return node.cwd
     for (const value of Object.values(node)) {
       const found = findCwd(value, depthLeft - 1)
       if (found !== '') return found

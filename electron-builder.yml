@@ -12,11 +12,20 @@ files:
   - assets/**/*
   - package.json
   - node_modules/**/*
+  # Ship only what runs. Source maps alone are 61MB and nothing loads them in
+  # production; type declarations, package docs and test fixtures are likewise
+  # dead weight in an installer. Deliberately NOT excluding plain .ts sources —
+  # the engine can load TypeScript at runtime (dsh-typert-*), so dropping those
+  # would trade size for a broken feature. LICENSE files stay, for compliance.
+  - '!**/*.{map,d.ts,d.mts,d.cts,tsbuildinfo}'
+  - '!**/{README,readme,CHANGELOG,changelog,HISTORY}*'
+  - '!**/{test,tests,__tests__,spec,example,examples,docs,doc}/**'
+  - '!**/{.github,.vscode,.idea}/**'
 
-# Bundled Chromium for the browser plugin (resources/browsers/chromium-*).
-extraResources:
-  - from: resources/browsers
-    to: browsers
+# Chromium for the browser pane is NOT bundled: it is ~355MB, roughly 40% of
+# the installed app, and most people never open that tab. It is downloaded on
+# first use into the user data directory instead (src/chromium.js), where it
+# also survives updates rather than being re-shipped with every release.
 
 # DSH's loader resolves plugin packages through Node's internal ESM loader,
 # which cannot read inside the asar archive (the DSH home's node_modules are
@@ -26,6 +35,12 @@ asar: false
 
 # Rely on the shipped N-API prebuilds; do not rebuild against Electron headers.
 npmRebuild: false
+
+# The app is Chinese/English only; Electron otherwise ships ~50 locale bundles
+# totalling 47MB.
+electronLanguages:
+  - en-US
+  - zh-CN
 
 mac:
   category: public.app-category.developer-tools
@@ -48,6 +63,26 @@ mac:
     - target: dmg
     # The zip + latest-mac.yml are what the app's built-in auto-updater uses.
     - target: zip
+
+win:
+  # electron-builder renders the .ico from this PNG.
+  icon: assets/icon-1024.png
+  target:
+    # nsis is the installer people expect; the portable build is for machines
+    # where installing is not an option (locked-down or shared).
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  deleteAppDataOnUninstall: false
+  # Keeping the shortcut name in sync with the product avoids two entries in
+  # the Start menu after a rename.
+  shortcutName: Dsh GUI
 
 # Self-update feed: GitHub Releases is the canonical channel (electron-builder
 # embeds it into app-update.yml and generates latest-mac.yml next to the zip).
