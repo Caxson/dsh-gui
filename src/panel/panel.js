@@ -131,9 +131,30 @@ function renderTabs() {
       closeTab(tab.tabId);
     });
 
-    chip.append(icon, label, close);
+    // Filled in by updateBadges(), which runs on every state update — the tab
+    // strip itself is not re-rendered then, so hover and scroll position
+    // survive.
+    const badge = document.createElement('span');
+    badge.className = 'tab-badge';
+    badge.hidden = true;
+
+    chip.dataset.tabId = String(tab.tabId);
+    chip.append(icon, label, badge, close);
     chip.addEventListener('click', () => activateTab(tab.tabId));
     tabstrip.appendChild(chip);
+  }
+  updateBadges();
+}
+
+/** Show how much a pane is holding, so it can be noticed without switching. */
+function updateBadges() {
+  for (const tab of tabs) {
+    const chip = tabstrip.querySelector(`[data-tab-id="${tab.tabId}"]`);
+    const badge = chip && chip.querySelector('.tab-badge');
+    if (!badge) continue;
+    const count = typeof tab.pane.count === 'number' ? tab.pane.count : 0;
+    badge.textContent = count > 99 ? '99+' : String(count);
+    badge.hidden = count <= 0;
   }
 }
 
@@ -214,6 +235,7 @@ window.dshPanel.onState((s) => {
   for (const tab of tabs) {
     if (tab.pane.renderState) tab.pane.renderState(acts, s.home ?? '');
   }
+  updateBadges();
 });
 
 window.dshPanel.onBrowserShot((shot) => {
