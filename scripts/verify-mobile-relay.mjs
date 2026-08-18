@@ -10,7 +10,8 @@
 import { spawn } from 'node:child_process'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { createHmac } from 'node:crypto'
+import { createHmac, randomBytes } from 'node:crypto'
+import { connect } from 'node:net'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const PORT = 8577
@@ -115,6 +116,78 @@ try {
   mac.ws.close()
   stranger.ws.close()
   await sleep(200)
+
+  // ── the limits that keep a nuisance off the neighbouring service ───────
+  // A second relay with the limits turned down far enough to observe. The
+  // caps are the whole reason this is safe to expose on a shared machine, so
+  // "it has a cap" is not a claim to take on faith.
+  const CAPPED = 8578
+  const capped = spawn(
+    process.execPath,
+    [join(ROOT, 'mobile', 'relay.mjs'),
+     '--port', String(CAPPED), '--max-rooms', '2', '--heartbeat-ms', '250'],
+    { stdio: ['ignore', 'ignore', 'inherit'] },
+  )
+  try {
+    await sleep(800)
+    const at = (room, role) => {
+      const ws = new WebSocket(`ws://127.0.0.1:${CAPPED}/?room=${room}&role=${role}`)
+      const ready = new Promise((resolve) => {
+        ws.addEventListener('open', () => resolve('open'))
+        ws.addEventListener('error', () => resolve('refused'))
+        ws.addEventListener('close', () => resolve('closed'))
+        setTimeout(() => resolve('timeout'), 5000)
+      })
+      return { ws, ready }
+    }
+
+    const r1 = at(roomFor('cap-1'), 'agent')
+    const r2 = at(roomFor('cap-2'), 'agent')
+    check((await r1.ready) === 'open', 'the first room opens under the cap')
+    check((await r2.ready) === 'open', 'the second room opens under the cap')
+    const r3 = at(roomFor('cap-3'), 'agent')
+    check((await r3.ready) !== 'open', 'a room beyond the cap is refused')
+    // Degrading new pairings is acceptable; breaking a live one is not.
+    const joiner = at(roomFor('cap-1'), 'client')
+    check(
+      (await joiner.ready) === 'open',
+      'a phone can still join an existing room while the relay is full',
+    )
+    joiner.ws.close(); r1.ws.close(); r2.ws.close()
+    await sleep(300)
+
+    // A peer that dies without closing: raw socket, real handshake, then
+    // silence. It never answers a ping, so the sweep must reclaim its role —
+    // otherwise a crashed phone locks its owner out for an hour.
+    const deadRoom = roomFor('cap-dead')
+    const raw = connect(CAPPED, '127.0.0.1')
+    const upgraded = await new Promise((resolve) => {
+      raw.on('connect', () => {
+        raw.write(
+          `GET /?room=${deadRoom}&role=client HTTP/1.1\r\n` +
+          `Host: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n` +
+          `Sec-WebSocket-Key: ${randomBytes(16).toString('base64')}\r\n` +
+          `Sec-WebSocket-Version: 13\r\n\r\n`,
+        )
+      })
+      raw.once('data', (d) => resolve(String(d).startsWith('HTTP/1.1 101')))
+      raw.on('error', () => resolve(false))
+      setTimeout(() => resolve(false), 4000)
+    })
+    check(upgraded, 'a raw socket can complete the handshake (the test is valid)')
+    // Two full intervals: one to mark it unanswered, one to terminate it.
+    await sleep(900)
+    const reclaim = at(deadRoom, 'client')
+    check(
+      (await reclaim.ready) === 'open',
+      'a peer that stops answering is swept, freeing its role',
+    )
+    reclaim.ws.close()
+    raw.destroy()
+    await sleep(150)
+  } finally {
+    capped.kill('SIGTERM')
+  }
 } catch (err) {
   console.error(err)
   done(1)
