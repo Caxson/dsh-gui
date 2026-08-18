@@ -14,16 +14,80 @@ window.__ModuleLoader__.load({
 		// not: its class names are content hashed and change with every
 		// release, while a slot is a published contract.
 		const jsx = require("react/jsx-runtime");
+		const React = require("react");
 
 		const CLASS = "dshgui-shell-status";
+		// The desktop bridge already serves this, and a client plugin runs on
+		// the same origin as the engine — so what is shown below is the app's
+		// real state, not a decorative figure.
+		const STATE_URL = "/dsh-gui/state";
+		const POLL_MS = 2000;
 
-		/** Small status line contributed to the engine's own sidebar. */
+		/** Distinct files the agent has touched, from the bridge's activity log. */
+		function countChangedFiles(state) {
+			const paths = new Set();
+			for (const a of (state && state.activities) || []) {
+				if (a && a.kind === "file" && a.path) paths.add(a.path);
+			}
+			return paths.size;
+		}
+
+		function shortenPath(path, home) {
+			if (typeof path !== "string") return "";
+			const short = home && path.startsWith(home) ? "~" + path.slice(home.length) : path;
+			// Keep the tail: the end of a path identifies it, the start repeats.
+			return short.length > 34 ? "…" + short.slice(-33) : short;
+		}
+
+		/**
+		 * A live line in the engine's own sidebar: which workspace is in play,
+		 * and how much the agent has changed in it.
+		 */
 		function ShellStatus() {
+			const [state, setState] = React.useState(null);
+			const [reachable, setReachable] = React.useState(true);
+
+			React.useEffect(() => {
+				let stopped = false;
+				let timer = null;
+				const tick = async () => {
+					try {
+						const res = await fetch(STATE_URL, { cache: "no-store" });
+						if (!res.ok) throw new Error("HTTP " + res.status);
+						const next = await res.json();
+						if (!stopped) {
+							setState(next);
+							setReachable(true);
+						}
+					} catch {
+						// The bridge only exists inside the desktop app. Opened in
+						// a plain browser this renders nothing, rather than showing
+						// a broken widget or retrying loudly forever.
+						if (!stopped) setReachable(false);
+					}
+					if (!stopped) timer = setTimeout(tick, POLL_MS);
+				};
+				tick();
+				return () => {
+					stopped = true;
+					if (timer) clearTimeout(timer);
+				};
+			}, []);
+
+			if (!reachable) return null;
+
+			const changed = countChangedFiles(state);
+			const workspace = shortenPath(state && state.cwd, state && state.home);
+
 			return jsx.jsxs("div", {
 				className: CLASS,
+				title: (state && state.cwd) || "",
 				children: [
 					jsx.jsx("span", { className: `${CLASS}-dot` }),
-					jsx.jsx("span", { className: `${CLASS}-text`, children: "Dsh GUI" }),
+					jsx.jsx("span", { className: `${CLASS}-text`, children: workspace || "Dsh GUI" }),
+					changed > 0
+						? jsx.jsx("span", { className: `${CLASS}-count`, children: String(changed) })
+						: null,
 				],
 			});
 		}
@@ -41,7 +105,7 @@ window.__ModuleLoader__.load({
 			style.textContent = `
 				.${CLASS} {
 					display: flex; align-items: center; gap: 6px;
-					padding: 4px 8px; border-radius: 6px;
+					min-width: 0; padding: 4px 8px; border-radius: 6px;
 					font-size: 11px; line-height: 1.4;
 					color: var(--dsw-alias-text-3, #81858c);
 				}
@@ -50,7 +114,15 @@ window.__ModuleLoader__.load({
 					background: var(--dsw-alias-brand-primary, #4176e6);
 					flex: none;
 				}
-				.${CLASS}-text { white-space: nowrap; }
+				.${CLASS}-text {
+					min-width: 0; overflow: hidden;
+					text-overflow: ellipsis; white-space: nowrap;
+				}
+				.${CLASS}-count {
+					flex: none; padding: 0 5px; border-radius: 7px;
+					background: var(--dsw-alias-brand-primary, #4176e6);
+					color: #fff; font-size: 9.5px; font-weight: 600; line-height: 14px;
+				}
 			`;
 			document.head.appendChild(style);
 		}
@@ -77,6 +149,7 @@ window.__ModuleLoader__.load({
 		exports.inject = inject;
 		exports.apply = apply;
 		exports.ShellStatus = ShellStatus;
+		exports.countChangedFiles = countChangedFiles;
 		return module.exports;
 	},
 });
