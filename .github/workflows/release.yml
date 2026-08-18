@@ -207,23 +207,6 @@ jobs:
       - name: Verify the release is internally consistent
         run: node scripts/verify-downloads.mjs out
 
-      # Built from the artifacts actually being released, not from the update
-      # feeds: the feeds list what the updater needs (mac .zip, installer only)
-      # while the page lists what a person installs (.dmg, both .exe flavours).
-      - name: Build the download page
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          # Release notes for our own changelog page. The download page links
-          # there instead of to GitHub Releases, whose asset table shows the
-          # file sizes the page deliberately never mentions. Best-effort: no
-          # notes simply means an empty changelog, never a failed release.
-          # The REST list carries the notes; `gh release list --json` does not
-          # expose a body field, so it would have produced an empty changelog.
-          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=30" \
-            > releases.json || echo '[]' > releases.json
-          node scripts/build-site.mjs out dist-site/index.html releases.json
-
       - name: Upload artifacts to the Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -253,6 +236,28 @@ jobs:
             echo "attempt $attempt failed; retrying in 30s"
             sleep 30
           done
+
+      # Ordered after the upload on purpose: the changelog is built from
+      # the repository's release list, so building it first produced notes
+      # that stopped one version short — the release being published did
+      # not exist yet, and the version someone had just downloaded was the
+      # one they could not read about.
+      # Built from the artifacts actually being released, not from the update
+      # feeds: the feeds list what the updater needs (mac .zip, installer only)
+      # while the page lists what a person installs (.dmg, both .exe flavours).
+      - name: Build the download page
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Release notes for our own changelog page. The download page links
+          # there instead of to GitHub Releases, whose asset table shows the
+          # file sizes the page deliberately never mentions. Best-effort: no
+          # notes simply means an empty changelog, never a failed release.
+          # The REST list carries the notes; `gh release list --json` does not
+          # expose a body field, so it would have produced an empty changelog.
+          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=30" \
+            > releases.json || echo '[]' > releases.json
+          node scripts/build-site.mjs out dist-site/index.html releases.json
 
       # The mirror is the app's default update feed and backs the download page,
       # so it must never lag a Release. electron-builder writes dot-named files
