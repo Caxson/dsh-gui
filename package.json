@@ -56,9 +56,10 @@
     "dsh-gui-flow": "file:flow",
     "dsh-gui-import": "file:import",
     "dsh-gui-market": "file:market",
+    "dsh-gui-shell": "file:shell",
     "electron-updater": "^6.8.9",
     "playwright": "^1.62.1",
-    "dsh-gui-shell": "file:shell"
+    "qrcode": "^1.5.4"
   },
   "devDependencies": {
     "electron": "^43.4.0",
