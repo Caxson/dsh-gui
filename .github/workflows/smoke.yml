@@ -53,3 +53,33 @@ jobs:
         # panel→composer backflow. Asserting lives in the runner rather than in
         # greps here, so a local run cannot pass on weaker terms than CI.
         run: npm run smoke
+
+  # Separate job, and a newer image: the phone client is Swift 6, which needs a
+  # toolchain the macos-14 image does not ship. Keeping it apart also means a
+  # runner-image change here cannot disturb the Electron smoke above.
+  phone-client:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Show the Swift toolchain
+        # Printed on purpose: if this check ever starts failing to compile, the
+        # first question is which compiler ran.
+        run: swift --version
+
+      - name: Install dependencies
+        # The relay needs `ws`; nothing else here does.
+        run: npm ci
+
+      - name: Verify the phone client against the desktop
+        # The phone protocol is implemented twice, in two languages. Where the
+        # two disagree — room derivation, reply shape, seconds vs milliseconds —
+        # nothing errors: the phone lands in a room nobody else is in, or shows
+        # a conversation dated 1970. This compiles the app's own Swift and runs
+        # it against the real relay and the real desktop link.
+        run: npm run verify:ios

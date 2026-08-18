@@ -5,3 +5,8 @@ tmp/
 *.log
 .DS_Store
 .claude/
+# Xcode per-user state: window layouts, breakpoints, which simulator someone
+# last selected. The shared scheme is committed; this is not.
+ios/**/xcuserdata/
+ios/**/*.xcuserdatad
+ios/build/
