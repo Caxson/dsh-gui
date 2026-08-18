@@ -8,6 +8,15 @@ const el = (id) => document.getElementById(id);
 
 let revealed = false;
 
+// The theme arrives as the same token sheet the panel gets. It is appended
+// after the inline styles, so it wins on order without needing !important —
+// the tokens it sets are only ever *defaults* in this file's own :root.
+const themeStyle = document.createElement('style');
+document.head.appendChild(themeStyle);
+window.dshPairing.onTheme((payload) => {
+  if (payload && typeof payload.css === 'string') themeStyle.textContent = payload.css;
+});
+
 function describe(s) {
   if (!s.enabled) return { text: '未开启', cls: 'off' };
   if (!s.connected) return { text: '正在连接中转…', cls: 'warn' };
@@ -24,7 +33,8 @@ function render(s) {
   el('toggle').className = s.enabled ? '' : 'primary';
   el('relay').value = s.relayUrl || '';
   el('pair-card').classList.toggle('hidden', !s.enabled || !s.hasSecret);
-  el('room').textContent = s.room ? `房间 ${s.room}` : '';
+  // The label is markup now, so the value is just the value.
+  el('room').textContent = s.room || '';
   if (!s.enabled) hideQr();
 }
 

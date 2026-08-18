@@ -168,6 +168,17 @@ function sendToPanels(channel, ...args) {
   for (const wc of panelTargets()) wc.send(channel, ...args);
 }
 
+/**
+ * Every window we skin ourselves. The pairing window is a separate surface with
+ * its own preload, and leaving it out of the theme broadcast is how it ended up
+ * carrying its own copy of the palette — which then ignored every theme switch.
+ */
+function themedTargets() {
+  const targets = panelTargets();
+  if (pairingWin && !pairingWin.isDestroyed()) targets.push(pairingWin.webContents);
+  return targets;
+}
+
 function layoutViews() {
   if (!win || win.isDestroyed()) return;
   const { width, height } = win.getContentBounds();
@@ -324,7 +335,8 @@ async function applyTheme(id) {
       console.warn('[dsh-gui] theme injection failed:', err.message);
     }
   }
-  sendToPanels('panel:theme', { css: panelCss(theme), terminal: terminalTheme(theme), id: theme.id });
+  const payload = { css: panelCss(theme), terminal: terminalTheme(theme), id: theme.id };
+  for (const wc of themedTargets()) wc.send('panel:theme', payload);
   try {
     writeFileSync(themePrefPath(), JSON.stringify({ id: theme.id }));
   } catch {
@@ -801,6 +813,14 @@ function openPairingWindow() {
     },
   });
   pairingWin.loadFile(join(__dirname, 'pairing', 'pairing.html'));
+  // A window that only learns the theme on the *next* switch opens wearing the
+  // fallback palette, which is a different look from the rest of the app.
+  pairingWin.webContents.on('did-finish-load', () => {
+    const themes = loadThemes(userThemeDir());
+    const theme = themes.find((t) => t.id === currentThemeId()) ?? themes[0];
+    if (!theme || !pairingWin || pairingWin.isDestroyed()) return;
+    pairingWin.webContents.send('panel:theme', { css: panelCss(theme), id: theme.id });
+  });
   pairingWin.on('closed', () => { pairingWin = null; });
 }
 
@@ -1223,6 +1243,14 @@ function createWindow() {
                          // The payload carries the secret; only its shape is reported.
                          payloadOk: /^dsh-gui:\\/\\/pair\\?/.test(r.payload || ''),
                          state: document.getElementById('state').textContent,
+                         // This window is skinned by a sheet main pushes it. It
+                         // once carried its own copy of the palette instead and
+                         // sat out every theme switch, so check the sheet
+                         // actually arrived — the wiring existed before and
+                         // nothing fed it.
+                         themed: Array.from(document.head.querySelectorAll('style'))
+                           .some((s) => s.textContent.includes('--bg-hover')
+                                     && s.textContent.includes('--shadow-hard')),
                        };
                      })()`,
                   );
@@ -1233,6 +1261,7 @@ function createWindow() {
                   const ok =
                     hasWebSocket && offAtStart && offAtEnd &&
                     revealed.payloadOk &&
+                    revealed.themed &&
                     revealed.qr.startsWith('data:image/png;base64') &&
                     revealed.inDom.startsWith('data:image/png;base64');
                   pairingProbe = ok
