@@ -8,6 +8,18 @@
     />
     <title>手机连接</title>
     <style>
+      /* Terminal-Core × Data-Dense Pro — see DESIGN.md.
+         Sans for prose so Chinese stays readable; mono for every value the
+         machine produced (relay address, room id, path); a mono micro-label
+         with wide tracking for section headers, which is where the hierarchy
+         comes from rather than from another shade of grey.
+
+         The palette is NOT defined here. Main sends the same token sheet the
+         panel gets, so this window follows the user's theme; an earlier version
+         carried its own copy and stayed dark while everything else changed.
+         What is below is only the fallback for the instant before that sheet
+         arrives — an undefined var() invalidates the whole declaration, so
+         every token used must have a value here too. */
       :root {
         --bg: #151517;
         --bg-2: #1b1b1c;
@@ -22,46 +34,82 @@
         --green: #3fb950;
         --red: #f85149;
         --yellow: #d29922;
-        --mono: "SF Mono", ui-monospace, Menlo, monospace;
         --radius: 8px;
         --radius-sm: 5px;
         --border-width: 1px;
+        --font-scale: 1;
+        /* Chinese has no true monospace face. Let the Latin and the digits take
+           the mono, and let Chinese fall to PingFang deliberately rather than
+           to whatever the system picks when the stack runs out. */
+        --mono: "SF Mono", ui-monospace, Menlo, "PingFang SC", monospace;
+        --font-ui: -apple-system, "SF Pro Text", "PingFang SC", sans-serif;
       }
+
       * { box-sizing: border-box; margin: 0; padding: 0; }
       html, body { height: 100%; }
       body {
         background: var(--bg);
         color: var(--text);
-        font-family: -apple-system, "SF Pro Text", "PingFang SC", sans-serif;
-        font-size: 13px;
-        padding: 18px 20px 20px;
+        font-family: var(--font-ui);
+        font-size: calc(13px * var(--font-scale));
+        line-height: 1.6;
+        padding: 22px 22px 26px;
         display: flex;
         flex-direction: column;
-        gap: 14px;
+        gap: 22px;
         overflow-y: auto;
         -webkit-font-smoothing: antialiased;
       }
-      h1 { font-size: 15px; font-weight: 600; }
-      .sub { color: var(--text-dim); font-size: 12px; line-height: 1.55; }
-      .card {
-        background: var(--bg-2);
+
+      /* ── type roles ──────────────────────────────────────────────────── */
+      .display { font-size: calc(17px * var(--font-scale)); font-weight: 600; letter-spacing: -0.01em; }
+      .prose { color: var(--text-mid); }
+      .prose strong { color: var(--text); font-weight: 600; }
+      /* Section headers. Mono + tracking + size is the hierarchy; adding a
+         third grey would not have been one. */
+      .label {
+        font-family: var(--mono);
+        font-size: calc(10px * var(--font-scale));
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--text-dim);
+      }
+      /* Anything the machine produced. tabular-nums so a room id or a port does
+         not shift width as it changes. */
+      .value {
+        font-family: var(--mono);
+        font-variant-numeric: tabular-nums;
+        font-size: calc(11px * var(--font-scale));
+        word-break: break-all;
+      }
+
+      /* ── the state line: the one thing you look at first ─────────────── */
+      .state-row { display: flex; align-items: center; gap: 10px; }
+      .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-dim); flex: none; }
+      .dot.on { background: var(--green); }
+      .dot.warn { background: var(--yellow); }
+      .state-text { flex: 1; min-width: 0; font-weight: 500; }
+
+      /* ── one framed block, not a stack of identical cards ────────────── */
+      .block {
         border: var(--border-width) solid var(--border);
         border-radius: var(--radius);
-        padding: 14px;
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
+        background: var(--bg-2);
       }
+      .block > * + * { border-top: var(--border-width) solid var(--border); }
+      .pad { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+
       .row { display: flex; align-items: center; gap: 10px; }
-      .row + .row { margin-top: 2px; }
       .grow { flex: 1; min-width: 0; }
+
       button {
         font: inherit;
+        font-size: calc(12px * var(--font-scale));
         color: var(--text);
         background: var(--bg-3);
         border: var(--border-width) solid var(--border-strong);
         border-radius: var(--radius-sm);
-        padding: 6px 12px;
+        padding: 6px 13px;
         cursor: pointer;
         /* Both matter in the relay row: without them the input's growth breaks
            a two-character label onto two lines. */
@@ -72,95 +120,134 @@
       button:disabled { opacity: 0.45; cursor: default; }
       button.primary { background: var(--accent); border-color: transparent; color: #fff; }
       button.danger { color: var(--red); }
+
       input[type="text"] {
-        font: inherit;
         font-family: var(--mono);
-        font-size: 11px;
+        font-size: calc(11px * var(--font-scale));
         color: var(--text);
         background: var(--bg);
         border: var(--border-width) solid var(--border-strong);
         border-radius: var(--radius-sm);
-        padding: 6px 8px;
+        padding: 7px 9px;
         width: 100%;
       }
-      .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-dim); flex: none; }
-      .dot.on { background: var(--green); }
-      .dot.warn { background: var(--yellow); }
-      .dot.off { background: var(--text-dim); }
-      .state { font-size: 12px; color: var(--text-mid); }
-      .qr-wrap { display: flex; gap: 14px; align-items: flex-start; }
+      input[type="text"]:focus { outline: none; border-color: var(--accent); }
+
+      /* ── pairing ─────────────────────────────────────────────────────── */
+      /* Not combined with .pad: that sets flex-direction column, and a class
+         that only says `display:flex` does not override it — the QR and its
+         warning collapsed into a stack instead of sitting side by side. */
+      .qr-wrap {
+        display: flex;
+        flex-direction: row;
+        gap: 16px;
+        align-items: flex-start;
+        padding: 14px 16px;
+      }
       .qr {
-        width: 168px; height: 168px; flex: none;
-        background: #fff; border-radius: var(--radius-sm); padding: 8px;
+        width: 152px; height: 152px; flex: none;
+        background: #fff; border-radius: var(--radius-sm); padding: 7px;
       }
       .qr img { width: 100%; height: 100%; display: block; image-rendering: pixelated; }
-      .warn-text { color: var(--yellow); font-size: 12px; line-height: 1.5; }
-      .mono { font-family: var(--mono); font-size: 11px; color: var(--text-dim); word-break: break-all; }
+      /* The body stays at full contrast and only the dangerous clause carries
+         the warning colour. Setting the whole paragraph in --yellow made the
+         one sentence that most needs reading the lowest-contrast text in the
+         window on a light theme — and it broke this project's own rule that
+         status colours mean status. */
+      .warn-text { color: var(--text); font-size: calc(12px * var(--font-scale)); }
+      .warn-text strong { color: var(--yellow); font-weight: 600; }
+
+      /* ── capability list: reference, so it reads as a table not a card ── */
+      .caps { display: flex; flex-direction: column; gap: 0; }
+      .caps li {
+        list-style: none;
+        display: flex;
+        align-items: baseline;
+        gap: 9px;
+        padding: 5px 0;
+        color: var(--text-mid);
+        font-size: calc(12px * var(--font-scale));
+      }
+      .caps li .mark {
+        font-family: var(--mono);
+        font-size: calc(10px * var(--font-scale));
+        color: var(--green);
+        flex: none;
+        width: 1.1em;
+      }
+      .caps li.no { color: var(--text-dim); }
+      .caps li.no .mark { color: var(--red); }
+
       .hidden { display: none; }
-      .granted { list-style: none; display: flex; flex-direction: column; gap: 5px; }
-      .granted li { color: var(--text-mid); font-size: 12px; }
-      .granted li::before { content: "· "; color: var(--text-dim); }
-      .granted li.no { color: var(--text-dim); }
-      .granted li.no::before { content: "× "; color: var(--red); }
     </style>
   </head>
   <body>
-    <div>
-      <h1>手机连接</h1>
-      <p class="sub">
+    <header style="display: flex; flex-direction: column; gap: 7px">
+      <h1 class="display">手机连接</h1>
+      <p class="prose">
         手机上可以看会话、翻历史、发消息。<strong>不能</strong>跑命令、开终端或读文件——
         这不是设置项，是网关里根本没有这些操作。
       </p>
-    </div>
+    </header>
 
-    <div class="card">
-      <div class="row">
-        <span class="dot off" id="dot"></span>
-        <span class="state grow" id="state">未开启</span>
+    <section style="display: flex; flex-direction: column; gap: 10px">
+      <div class="state-row">
+        <span class="dot" id="dot"></span>
+        <span class="state-text" id="state">未开启</span>
         <button id="toggle">开启</button>
       </div>
-      <div class="row" id="relay-row">
-        <span class="sub" style="flex: none">中转</span>
-        <input type="text" id="relay" spellcheck="false" />
-        <button id="relay-save">保存</button>
-      </div>
-      <p class="sub">
-        中转只转发帧、不保存内容，也拿不到配对密钥——它按房间号配对，而房间号是密钥的单向摘要。
-        想自己跑一个就改上面这行：仓库里的 <span class="mono">mobile/relay.mjs</span> 是完整实现。
-      </p>
-    </div>
 
-    <div class="card hidden" id="pair-card">
+      <div class="block">
+        <div class="pad">
+          <span class="label">中转</span>
+          <div class="row">
+            <input type="text" id="relay" spellcheck="false" class="grow" />
+            <button id="relay-save">保存</button>
+          </div>
+          <p class="prose" style="font-size: calc(12px * var(--font-scale))">
+            中转只转发帧、不保存内容，也拿不到配对密钥——它按房间号配对，而房间号是密钥的单向摘要。
+            想自己跑一个就改上面这行：仓库里的 <span class="value">mobile/relay.mjs</span> 是完整实现。
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="hidden" id="pair-card" style="display: flex; flex-direction: column; gap: 10px">
       <div class="row">
-        <span class="grow"><strong>配对</strong></span>
+        <span class="label grow">配对</span>
         <button id="reveal">显示二维码</button>
         <button id="rotate" class="danger">更换密钥</button>
       </div>
       <p class="warn-text hidden" id="rotate-warn">
         更换后，已配对的手机会立刻失效，需要重新扫码。
       </p>
-      <div class="qr-wrap hidden" id="qr-wrap">
-        <div class="qr"><img id="qr" alt="配对二维码" /></div>
-        <div class="grow" style="display: flex; flex-direction: column; gap: 8px">
-          <p class="warn-text">
-            这张码里带着配对密钥本身。<strong>拿到它的人就能连上你的会话</strong>——
-            别截图发出去，也别投屏。
-          </p>
-          <button id="copy">复制配对链接</button>
-          <p class="mono" id="room"></p>
+      <div class="block hidden" id="qr-wrap">
+        <div class="qr-wrap">
+          <div class="qr"><img id="qr" alt="配对二维码" /></div>
+          <div class="grow" style="display: flex; flex-direction: column; align-items: flex-start; gap: 9px">
+            <p class="warn-text">
+              这张码里带着配对密钥本身。<strong>拿到它的人就能连上你的会话</strong>——
+              别截图发出去，也别投屏。
+            </p>
+            <button id="copy">复制配对链接</button>
+            <div style="display: flex; flex-direction: column; gap: 3px">
+              <span class="label">房间</span>
+              <span class="value" id="room" style="color: var(--text-dim)"></span>
+            </div>
+          </div>
         </div>
       </div>
-    </div>
+    </section>
 
-    <div class="card">
-      <strong style="font-size: 12px">手机能做什么</strong>
-      <ul class="granted">
-        <li>列出会话</li>
-        <li>读一个会话的历史</li>
-        <li>向会话发消息</li>
-        <li class="no">执行工具、开终端、读写文件、新建或删除任何东西</li>
+    <section style="display: flex; flex-direction: column; gap: 8px">
+      <span class="label">手机能做什么</span>
+      <ul class="caps">
+        <li><span class="mark">+</span>列出会话</li>
+        <li><span class="mark">+</span>读一个会话的历史</li>
+        <li><span class="mark">+</span>向会话发消息</li>
+        <li class="no"><span class="mark">×</span>执行工具、开终端、读写文件、新建或删除任何东西</li>
       </ul>
-    </div>
+    </section>
 
     <script src="pairing.js"></script>
   </body>
