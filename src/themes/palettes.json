@@ -106,6 +106,27 @@
       }
     },
     {
+      "id": "neon-brutal",
+      "name": "霓虹硬边",
+      "author": "Dsh GUI",
+      "source": "",
+      "dark": true,
+      "style": {
+        "radius": 0,
+        "borderWidth": 2,
+        "shadowOffset": 3,
+        "fontScale": 1,
+        "fontMono": "'SF Mono', ui-monospace, Menlo, monospace",
+        "uppercase": true
+      },
+      "colors": {
+        "bg": "#000000", "bgAlt": "#0a0a0a", "bgRaised": "#141414", "bgOverlay": "#1e1e1e",
+        "text": "#ffffff", "textMuted": "#b9b9b9", "textFaint": "#6e6e6e",
+        "border": "#2c2c2c", "accent": "#e8ff36", "accentText": "#000000",
+        "green": "#3dffa8", "red": "#ff2d6f", "yellow": "#e8ff36", "purple": "#c04bff", "cyan": "#3df0ff"
+      }
+    },
+    {
       "id": "solarized-light",
       "name": "Solarized Light",
       "author": "Ethan Schoonover",

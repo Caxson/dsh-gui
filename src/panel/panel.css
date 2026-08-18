@@ -20,7 +20,15 @@
   --add-bg: rgba(63, 185, 80, 0.12);
   --rem-bg: rgba(248, 81, 73, 0.12);
   --mono: "SF Mono", ui-monospace, Menlo, monospace;
+  /* Shape tokens. A theme overrides these; the defaults must exist here too,
+     because the theme stylesheet arrives after first paint and an undefined
+     var() makes the whole declaration invalid — every border would vanish
+     rather than fall back. */
   --radius: 8px;
+  --radius-sm: 5px;
+  --border-width: 1px;
+  --shadow-hard: 0 0 0 transparent;
+  --font-scale: 1;
 }
 
 * {
@@ -43,7 +51,7 @@ body {
 body {
   display: flex;
   flex-direction: column;
-  border-left: 1px solid var(--border);
+  border-left: var(--border-width) solid var(--border);
 }
 
 ::-webkit-scrollbar {
@@ -52,7 +60,7 @@ body {
 }
 ::-webkit-scrollbar-thumb {
   background: rgba(140, 150, 175, 0.28);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 3px solid transparent;
   background-clip: content-box;
 }
@@ -70,7 +78,7 @@ body {
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 
 /* Respect a system-level request for less motion. */
@@ -90,7 +98,7 @@ body {
   gap: 4px;
   padding: 8px 8px 8px 10px;
   background: var(--bg);
-  border-bottom: 1px solid var(--border);
+  border-bottom: var(--border-width) solid var(--border);
 }
 
 .tabstrip {
@@ -113,8 +121,8 @@ body {
   gap: 6px;
   max-width: 168px;
   padding: 5px 8px 5px 10px;
-  border: 1px solid transparent;
-  border-radius: 9px;
+  border: var(--border-width) solid transparent;
+  border-radius: var(--radius);
   background: transparent;
   color: var(--text-dim);
   font: inherit;
@@ -152,7 +160,7 @@ body {
   flex: 0 0 auto;
   min-width: 16px;
   padding: 0 4px;
-  border-radius: 7px;
+  border-radius: var(--radius);
   background: var(--bg-hover);
   color: var(--text-mid);
   font-size: 9.5px;
@@ -173,7 +181,7 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   font-size: 13px;
   line-height: 1;
   color: var(--text-dim);
@@ -203,7 +211,7 @@ body {
   width: 27px;
   height: 27px;
   border: none;
-  border-radius: 7px;
+  border-radius: var(--radius);
   background: transparent;
   color: var(--text-dim);
   cursor: pointer;
@@ -221,8 +229,8 @@ body {
   z-index: 100;
   min-width: 178px;
   padding: 5px;
-  border: 1px solid var(--border-strong);
-  border-radius: 11px;
+  border: var(--border-width) solid var(--border-strong);
+  border-radius: var(--radius);
   background: var(--bg-2);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
 }
@@ -234,7 +242,7 @@ body {
   width: 100%;
   padding: 7px 9px;
   border: none;
-  border-radius: 7px;
+  border-radius: var(--radius);
   background: transparent;
   color: var(--text);
   font: inherit;
@@ -308,7 +316,7 @@ body {
   color: var(--text-dim);
   font-family: var(--mono);
   font-size: 10.5px;
-  border-top: 1px solid var(--border);
+  border-top: var(--border-width) solid var(--border);
   background: var(--bg-2);
   overflow: hidden;
   white-space: nowrap;
@@ -332,7 +340,7 @@ body {
 
 .file-card {
   margin-bottom: 8px;
-  border: 1px solid var(--border);
+  border: var(--border-width) solid var(--border);
   border-radius: var(--radius);
   background: var(--bg-2);
   overflow: hidden;
@@ -404,7 +412,7 @@ body {
 
 .file-body {
   display: none;
-  border-top: 1px solid var(--border);
+  border-top: var(--border-width) solid var(--border);
 }
 
 .file-card.open .file-body {
@@ -544,7 +552,7 @@ body {
   flex: 0 0 auto;
   margin: 8px 8px 0;
   padding: 5px 10px;
-  border: 1px solid var(--border);
+  border: var(--border-width) solid var(--border);
   border-radius: var(--radius);
   background: var(--bg-2);
   color: var(--text-mid);
@@ -566,7 +574,7 @@ body {
   align-items: center;
   justify-content: center;
   margin: 8px;
-  border: 1px solid var(--border);
+  border: var(--border-width) solid var(--border);
   border-radius: var(--radius);
   background: var(--bg-2);
   overflow: hidden;
@@ -584,7 +592,7 @@ body {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  border-top: 1px solid var(--border);
+  border-top: var(--border-width) solid var(--border);
 }
 
 .pane-title {
@@ -598,7 +606,7 @@ body {
 
 .web-card {
   margin-bottom: 8px;
-  border: 1px solid var(--border);
+  border: var(--border-width) solid var(--border);
   border-radius: var(--radius);
   background: var(--bg-2);
   overflow: hidden;
@@ -620,7 +628,7 @@ body {
 
 .web-links {
   padding: 6px 10px;
-  border-top: 1px solid var(--border);
+  border-top: var(--border-width) solid var(--border);
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -642,7 +650,7 @@ body {
 
 .web-result {
   padding: 6px 10px;
-  border-top: 1px solid var(--border);
+  border-top: var(--border-width) solid var(--border);
   color: var(--text-dim);
   font-size: 11px;
   word-break: break-all;
@@ -686,7 +694,7 @@ body {
 .chat-msg {
   max-width: 88%;
   padding: 8px 12px;
-  border-radius: 12px;
+  border-radius: var(--radius);
   font-size: 12.5px;
   line-height: 1.6;
   white-space: pre-wrap;
@@ -696,7 +704,7 @@ body {
 .chat-msg.user {
   align-self: flex-end;
   background: var(--bg-3);
-  border: 1px solid var(--border);
+  border: var(--border-width) solid var(--border);
 }
 
 .chat-msg.assistant {
@@ -712,8 +720,8 @@ body {
   gap: 8px;
   margin: 8px 10px 12px;
   padding: 9px 10px 9px 13px;
-  border: 1px solid var(--border-strong);
-  border-radius: 14px;
+  border: var(--border-width) solid var(--border-strong);
+  border-radius: var(--radius);
   background: var(--bg-2);
 }
 
@@ -780,7 +788,7 @@ body {
   align-items: center;
   gap: 8px;
   padding: 8px 10px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: var(--border-width) solid var(--border);
   flex: none;
 }
 .tree-headtext { min-width: 0; }
@@ -807,7 +815,7 @@ body {
   width: 24px;
   height: 24px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-dim);
   font: inherit;
@@ -824,7 +832,7 @@ body {
   gap: 5px;
   height: 24px;
   padding-right: 10px;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   margin: 0 6px;
   cursor: default;
   user-select: none;
@@ -866,7 +874,7 @@ body {
   height: 18px;
   padding: 0;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-dim);
   font-size: 11px;
@@ -883,14 +891,14 @@ body {
 .theme-menu { min-width: 236px; max-height: 62vh; overflow-y: auto; }
 .theme-item { gap: 10px; }
 .theme-item.on { background: var(--bg-hover); }
-.theme-swatch { display: inline-flex; flex: none; border-radius: 4px; overflow: hidden; }
+.theme-swatch { display: inline-flex; flex: none; border-radius: var(--radius-sm); overflow: hidden; }
 .theme-swatch i { display: block; width: 9px; height: 15px; }
 .theme-name { flex: 1 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .theme-by { flex: none; color: var(--text-dim); font-size: 10.5px; }
 .theme-hint {
   margin: 4px 4px 0;
   padding: 7px 9px 3px;
-  border-top: 1px solid var(--border);
+  border-top: var(--border-width) solid var(--border);
   color: var(--text-dim);
   font-size: 10.5px;
   line-height: 1.5;
@@ -904,8 +912,8 @@ body {
   position: fixed;
   z-index: 40;
   padding: 5px 10px;
-  border: 1px solid var(--border-strong);
-  border-radius: 6px;
+  border: var(--border-width) solid var(--border-strong);
+  border-radius: var(--radius-sm);
   background: var(--bg-3);
   color: var(--text);
   font-size: 11.5px;
@@ -942,7 +950,7 @@ body {
   color: #fff;
   background: var(--accent);
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--radius);
   cursor: pointer;
 }
 .empty-action:hover:not(:disabled) { filter: brightness(1.1); }
@@ -959,8 +967,8 @@ body {
   text-align: left;
   color: var(--text-dim);
   background: var(--bg-hover);
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-sm);
   white-space: pre-wrap;
   word-break: break-all;
 }

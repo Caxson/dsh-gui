@@ -33,6 +33,40 @@ const REQUIRED = [
 const HEX = /^#[0-9a-fA-F]{6}$/;
 
 /**
+ * Optional style beyond colour. A palette alone cannot express a look — the
+ * difference between a soft rounded theme and a hard-edged neon one is radius,
+ * border weight and shadow, not hue. These are constrained to numbers and a
+ * font list rather than free CSS, because a theme file is user-supplied and its
+ * values are written into a stylesheet.
+ */
+const STYLE_LIMITS = {
+  radius: { min: 0, max: 24, fallback: 8 },
+  borderWidth: { min: 0, max: 4, fallback: 1 },
+  shadowOffset: { min: 0, max: 12, fallback: 0 },
+  fontScale: { min: 0.85, max: 1.25, fallback: 1 },
+};
+
+// A font stack from a theme file is quoted into CSS, so keep it to characters
+// that cannot end a declaration or open a url() — no semicolons, braces, or
+// parentheses.
+const FONT_SAFE = /^[A-Za-z0-9 ,'"一-龥_-]{0,160}$/;
+
+function styleOf(theme) {
+  const raw = (theme && theme.style) || {};
+  const out = {};
+  for (const [key, limit] of Object.entries(STYLE_LIMITS)) {
+    const value = Number(raw[key]);
+    out[key] = Number.isFinite(value)
+      ? Math.min(limit.max, Math.max(limit.min, value))
+      : limit.fallback;
+  }
+  out.fontUi = FONT_SAFE.test(String(raw.fontUi ?? '')) && raw.fontUi ? String(raw.fontUi) : '';
+  out.fontMono = FONT_SAFE.test(String(raw.fontMono ?? '')) && raw.fontMono ? String(raw.fontMono) : '';
+  out.uppercase = raw.uppercase === true;
+  return out;
+}
+
+/**
  * Check a theme before it is ever applied. A user-supplied file is untrusted
  * input: a bad colour would land inside a stylesheet, so every value has to be
  * a plain hex colour and nothing else.
@@ -158,7 +192,17 @@ function engineCss(theme) {
 /** The same palette, expressed in the panel's own variables. */
 function panelCss(theme) {
   const c = theme.colors;
+  const s = styleOf(theme);
   const lines = [
+    `--radius: ${s.radius}px`,
+    `--radius-sm: ${Math.max(0, s.radius - 3)}px`,
+    `--border-width: ${s.borderWidth}px`,
+    // A hard offset shadow is what makes a neo-brutalist theme read as one;
+    // at 0 it simply disappears rather than needing a second code path.
+    `--shadow-hard: ${s.shadowOffset}px ${s.shadowOffset}px 0 ${c.accent}`,
+    `--font-scale: ${s.fontScale}`,
+    ...(s.fontUi ? [`--font-ui: ${s.fontUi}`] : []),
+    ...(s.fontMono ? [`--mono: ${s.fontMono}`] : []),
     `--bg: ${c.bg}`,
     `--bg-2: ${c.bgAlt}`,
     `--bg-3: ${c.bgRaised}`,
@@ -176,7 +220,12 @@ function panelCss(theme) {
     `--add-bg: rgba(${rgb(c.green)}, 0.12)`,
     `--rem-bg: rgba(${rgb(c.red)}, 0.12)`,
   ];
-  return `:root {\n  ${lines.join(';\n  ')};\n}\n`;
+  let css = `:root {\n  ${lines.join(';\n  ')};\n}\n`;
+  if (s.fontUi) css += `body { font-family: ${s.fontUi}; }\n`;
+  // Uppercase labels are part of the look for terminal-flavoured themes, and
+  // only touch labels — never content, which must stay as the agent wrote it.
+  if (s.uppercase) css += `.tab-label, .tree-title, .empty { text-transform: uppercase; letter-spacing: .04em; }\n`;
+  return css;
 }
 
 /** Terminal colours, so xterm follows the theme rather than staying fixed. */
