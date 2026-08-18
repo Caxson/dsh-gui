@@ -33,6 +33,12 @@ contextBridge.exposeInMainWorld('dshPanel', {
   // cannot reach the engine on a relative URL.
   filesList: (path, showAll) => ipcRenderer.invoke('panel:files-list', path, showAll),
 
+  // Themes: main owns the palettes and pushes the derived CSS + terminal
+  // colours, so a switch takes effect without a reload.
+  themes: () => ipcRenderer.invoke('panel:themes'),
+  setTheme: (id) => ipcRenderer.invoke('panel:theme-set', id),
+  onTheme: (fn) => ipcRenderer.on('panel:theme', (_e, payload) => fn(payload)),
+
   // Desktop actions. Main owns the clipboard and validates the reveal path
   // against the workspace before handing it to the OS.
   copyText: (text) => ipcRenderer.invoke('panel:copy-text', text),

@@ -25,7 +25,8 @@
     "dist:dmg": "electron-builder --mac dmg",
     "dist:unsigned": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dmg -c.mac.notarize=false",
     "dist:dir": "electron-builder --mac dir",
-    "verify:mobile": "node scripts/verify-mobile-gateway.mjs && node scripts/verify-mobile-relay.mjs"
+    "verify:mobile": "node scripts/verify-mobile-gateway.mjs && node scripts/verify-mobile-relay.mjs",
+    "verify:themes": "node scripts/verify-themes.mjs"
   },
   "dependencies": {
     "@deepseek-ai/cordis-plugin-group": "1.0.1",
