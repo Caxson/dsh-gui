@@ -51,9 +51,41 @@ const STYLE_LIMITS = {
 // parentheses.
 const FONT_SAFE = /^[A-Za-z0-9 ,'"一-龥_-]{0,160}$/;
 
+/**
+ * Soft background washes, for themes whose look is a lit surface rather than a
+ * flat one — without that, a "glass" theme is just a light grey theme.
+ *
+ * Structured on purpose. The obvious design is a CSS gradient string in the
+ * theme file, and that would hand a downloadable file a way to write arbitrary
+ * CSS: a gradient is full of parentheses and commas, which is exactly what the
+ * rest of this file refuses to let through. So a theme declares *where* and
+ * *what colour*, and the gradient is composed here from clamped numbers and a
+ * validated hex.
+ */
+const MAX_GLOWS = 3;
+
+function glowsOf(raw) {
+  if (!Array.isArray(raw)) return [];
+  const clamp = (v, lo, hi, fallback) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : fallback;
+  };
+  return raw
+    .filter((g) => g && typeof g === 'object' && HEX.test(String(g.color ?? '')))
+    .slice(0, MAX_GLOWS)
+    .map((g) => ({
+      color: String(g.color),
+      x: clamp(g.x, -50, 150, 50),
+      y: clamp(g.y, -50, 150, 50),
+      size: clamp(g.size, 10, 200, 70),
+      alpha: clamp(g.alpha, 0, 1, 0.5),
+    }));
+}
+
 function styleOf(theme) {
   const raw = (theme && theme.style) || {};
   const out = {};
+  out.glows = glowsOf(raw.glows);
   for (const [key, limit] of Object.entries(STYLE_LIMITS)) {
     const value = Number(raw[key]);
     out[key] = Number.isFinite(value)
@@ -160,12 +192,98 @@ function engineCss(theme) {
     `--dsw-alias-bg-multi-select: ${c.bgRaised}`,
     `--dsw-alias-bg-skeleton: ${mix(c.bg, c.text, 0.08)}`,
     `--dsw-alias-bg-mask-1: rgba(${rgb(c.bg)}, 0.72)`,
+    // Kept, but note: no `--dsw-alias-text-*` exists in the current engine
+    // build — these four override nothing. Text lives under `label-*` below.
+    // They stay in case an older build reads them; they cost nothing and
+    // removing them would be guessing in the other direction.
     `--dsw-alias-text-1: ${c.text}`,
     `--dsw-alias-text-2: ${c.textMuted}`,
     `--dsw-alias-text-3: ${c.textFaint}`,
     `--dsw-alias-text-4: ${mix(c.textFaint, c.bg, 0.35)}`,
+
+    // ── labels: the engine's actual text colours ──────────────────────────
+    `--dsw-alias-label-primary: ${c.text}`,
+    `--dsw-alias-label-primary-bluish: ${c.text}`,
+    `--dsw-alias-label-secondary: ${c.textMuted}`,
+    `--dsw-alias-label-tertiary: ${c.textFaint}`,
+    `--dsw-alias-label-caption: ${c.textFaint}`,
+    `--dsw-alias-label-dimmed: ${mix(c.textFaint, c.bg, 0.35)}`,
+    // The colour used *on* a light surface, so it has to follow the
+    // background, not the text. Left unmapped, a light theme gets a white
+    // label on a white button.
+    `--dsw-alias-label-primary-foreground: ${c.bg}`,
+    `--dsw-alias-label-primary-inverted: ${c.bgOverlay}`,
+
+    // ── surfaces the engine names specifically ────────────────────────────
+    // Never mapped before. Every one of these stayed at its dark default, which
+    // no dark theme revealed — the sidebar and the composer simply looked
+    // right by accident. On a light theme they are black holes in the layout.
+    // The mapping is not guesswork: the engine's own dark values line up
+    // exactly with the layers of the palette this app was built from
+    // (#1b1b1c = bgAlt, #2c2c2e = bgRaised, #353638 = bgOverlay).
+    `--dsw-specific-sidebar-fill: ${c.bgAlt}`,
+    `--dsw-specific-sidebar-nav-item-hover: ${c.bgRaised}`,
+    `--dsw-specific-sidebar-nav-item-active: ${mix(c.bgOverlay, c.text, 0.12)}`,
+    `--dsw-specific-sidebar-nav-item-active-accent: ${c.bgOverlay}`,
+    `--dsw-specific-bubble: ${c.bgRaised}`,
+    `--dsw-specific-bubble-highlight: ${mix(c.bgOverlay, c.text, 0.12)}`,
+    `--dsw-specific-input-major: ${c.bgRaised}`,
+    `--dsw-specific-login-input: ${c.bgAlt}`,
+    `--dsw-specific-menu: ${c.bgOverlay}`,
+    `--dsw-specific-selector: ${c.bgOverlay}`,
+    `--dsw-specific-tip: ${c.bgOverlay}`,
+
+    `--dsw-alias-bg-layer-3: ${c.bgOverlay}`,
     `--dsw-alias-border-l1: ${c.border}`,
     `--dsw-alias-border-l2: ${mix(c.border, c.bg, 0.4)}`,
+    // These are white-at-low-alpha by default, which is a hairline on a dark
+    // surface and nothing at all on a light one. Derive them from the text
+    // colour so they are always a hairline against the background they sit on.
+    `--dsw-alias-border-l3: rgba(${rgb(c.text)}, 0.16)`,
+    `--dsw-alias-border-l4: rgba(${rgb(c.text)}, 0.2)`,
+    `--dsw-alias-border-l2-darkmode-thin: rgba(${rgb(c.text)}, 0.06)`,
+    `--dsw-alias-border-inverted: rgba(${rgb(c.text)}, 0.06)`,
+    `--dsw-alias-border-inverted2: rgba(${rgb(c.text)}, 0.08)`,
+    `--dsw-alias-interactive-bg-hover: rgba(${rgb(c.text)}, 0.08)`,
+    `--dsw-alias-interactive-bg-active: rgba(${rgb(c.text)}, 0.14)`,
+    `--dsw-alias-interactive-bg-hover-accent: rgba(${rgb(c.text)}, 0.24)`,
+    `--dsw-alias-interactive-bg-hover-solid: ${c.bgOverlay}`,
+    `--dsw-alias-interactive-bg-hover-danger: rgba(${rgb(c.red)}, 0.15)`,
+
+    // ── buttons ───────────────────────────────────────────────────────────
+    // contrast-fill and primary-hover both default to the palette's own text
+    // colour; on a light theme, leaving them made white-on-white buttons.
+    `--dsw-alias-button-contrast-fill: ${c.text}`,
+    `--dsw-alias-button-primary-fill: ${c.accent}`,
+    `--dsw-alias-button-primary-hover: ${mix(c.accent, c.text, 0.2)}`,
+    `--dsw-alias-button-primary-dimmed: ${mix(c.accent, c.bg, 0.6)}`,
+    `--dsw-alias-button-ghost-active-fill: ${mix(c.bgOverlay, c.text, 0.12)}`,
+    `--dsw-alias-button-ghost-active-hover: ${mix(c.bgOverlay, c.text, 0.28)}`,
+    `--dsw-alias-button-ghost-active-border: ${c.textFaint}`,
+    `--dsw-alias-button-info-fill: ${c.accent}`,
+    `--dsw-alias-button-info-hover: ${mix(c.accent, c.text, 0.2)}`,
+    `--dsw-alias-button-tool-bar-fill: rgba(${rgb(mix(c.bgOverlay, c.text, 0.3))}, 0.5)`,
+    `--dsw-alias-button-tool-bar-hover: rgba(${rgb(mix(c.bgOverlay, c.text, 0.3))}, 0.6)`,
+    `--dsw-alias-button-tool-bar-fill-invisible: rgba(${rgb(c.bg)}, 0.36)`,
+
+    // ── markdown surfaces ─────────────────────────────────────────────────
+    `--dsw-alias-markdown-code-block-banner: ${c.bgRaised}`,
+    `--dsw-alias-markdown-code-segment-selected: ${c.bgOverlay}`,
+    `--dsw-alias-markdown-code-segment-unselected: ${c.bgAlt}`,
+    `--dsw-alias-markdown-inline-code: ${c.bgRaised}`,
+    `--dsw-alias-markdown-placeholder: ${c.bgRaised}`,
+    `--dsw-alias-markdown-tag: ${c.bgRaised}`,
+    `--dsw-alias-markdown-citation: ${c.bgOverlay}`,
+
+    // ── scrollbars and states ─────────────────────────────────────────────
+    `--dsw-alias-scrollbar-bg-l1: ${mix(c.bgOverlay, c.text, 0.1)}`,
+    `--dsw-alias-scrollbar-bg-l2: ${mix(c.bgOverlay, c.text, 0.3)}`,
+    `--dsw-alias-scrollbar-hover-l1: ${mix(c.bgOverlay, c.text, 0.3)}`,
+    `--dsw-alias-scrollbar-hover-l2: ${mix(c.bgOverlay, c.text, 0.45)}`,
+    `--dsw-alias-state-error-primary: ${c.red}`,
+    `--dsw-alias-state-error-secondary: ${c.red}`,
+    `--dsw-alias-state-business-primary: ${c.accent}`,
+    `--dsw-alias-state-business-tertiary: ${mix(c.accent, c.bg, 0.7)}`,
     `--dsw-alias-brand-primary: ${c.accent}`,
     // The engine really does define a token by this name; it looks like a
     // build accident on their side, but overriding only the tidy one leaves
@@ -186,10 +304,30 @@ function engineCss(theme) {
   // cascade than anything injected at did-finish-load and wins ties on order.
   // Measured — an earlier version without this applied cleanly (a marker
   // property did change) while every contested token kept the engine's value.
-  return `${sel} {\n  ${lines.map((l) => `${l} !important`).join(';\n  ')};\n}\n`;
+  let css = `${sel} {\n  ${lines.map((l) => `${l} !important`).join(';\n  ')};\n}\n`;
+  // The wash, if the theme has one. Kept out of the token block above because
+  // it is a paint on the surface, not a token the engine's components read —
+  // and without it a light theme is a grey rectangle in the main view while the
+  // panel beside it is lit, which reads as two different apps.
+  const image = bgImage(styleOf(theme));
+  if (image !== 'none') {
+    css += `${sel} {\n  background-image: ${image} !important;\n` +
+           `  background-attachment: fixed !important;\n}\n`;
+  }
+  return css;
 }
 
-/** The same palette, expressed in the panel's own variables. */
+/** Compose the washes into one background-image value, or `none`. */
+function bgImage(style) {
+  if (!style.glows.length) return 'none';
+  return style.glows
+    .map((g) =>
+      `radial-gradient(${g.size}% ${g.size}% at ${g.x}% ${g.y}%, ` +
+      `rgba(${rgb(g.color)}, ${g.alpha}), rgba(${rgb(g.color)}, 0) 70%)`,
+    )
+    .join(', ');
+}
+
 function panelCss(theme) {
   const c = theme.colors;
   const s = styleOf(theme);
@@ -201,6 +339,10 @@ function panelCss(theme) {
     // at 0 it simply disappears rather than needing a second code path.
     `--shadow-hard: ${s.shadowOffset}px ${s.shadowOffset}px 0 ${c.accent}`,
     `--font-scale: ${s.fontScale}`,
+    // `none` rather than omitting it: an undefined var() invalidates the whole
+    // declaration, so a theme without glows would erase the background colour
+    // of anything that layers an image over it.
+    `--bg-image: ${bgImage(s)}`,
     ...(s.fontUi ? [`--font-ui: ${s.fontUi}`] : []),
     ...(s.fontMono ? [`--mono: ${s.fontMono}`] : []),
     `--bg: ${c.bg}`,

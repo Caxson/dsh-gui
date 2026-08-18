@@ -19,7 +19,12 @@
   --purple: #b48cf2;
   --add-bg: rgba(63, 185, 80, 0.12);
   --rem-bg: rgba(248, 81, 73, 0.12);
-  --mono: "SF Mono", ui-monospace, Menlo, monospace;
+  /* Ends in PingFang SC on purpose. Chinese has no true monospace face, and
+     these stacks carry file paths and activity text — without it the Chinese
+     in a path falls through to whatever the system picks last, which is a
+     different face from the rest of the panel. Latin and digits still take
+     SF Mono. */
+  --mono: "SF Mono", ui-monospace, Menlo, "PingFang SC", monospace;
   /* Shape tokens. A theme overrides these; the defaults must exist here too,
      because the theme stylesheet arrives after first paint and an undefined
      var() makes the whole declaration invalid — every border would vanish
@@ -29,6 +34,9 @@
   --border-width: 1px;
   --shadow-hard: 0 0 0 transparent;
   --font-scale: 1;
+  /* Same reason as the rest of these: the theme sheet arrives after first
+     paint, and an undefined var() takes the whole declaration with it. */
+  --bg-image: none;
 }
 
 * {
@@ -40,7 +48,12 @@
 html,
 body {
   height: 100%;
-  background: var(--bg);
+  /* The wash sits over the flat colour, so a theme without one loses nothing.
+     It is what separates a lit surface from a grey rectangle — a light
+     developer tool that is only white reads as unfinished. */
+  background-color: var(--bg);
+  background-image: var(--bg-image, none);
+  background-attachment: fixed;
   color: var(--text);
   font-family: -apple-system, "SF Pro Text", "PingFang SC", sans-serif;
   font-size: 12px;
@@ -480,6 +493,9 @@ body {
   margin: 5px 0 0;
   padding: 4px 0 6px;
   font-family: var(--mono);
+  /* Line numbers change width as they cross a power of ten otherwise, and the
+     gutter shifts while you are reading it. */
+  font-variant-numeric: tabular-nums;
   font-size: 11px;
   line-height: 1.55;
   max-height: 240px;

@@ -12,7 +12,7 @@
  *      injects the desktop skin, and manages lifecycle.
  */
 
-const { app, BaseWindow, BrowserWindow, WebContentsView, Menu, shell, dialog, ipcMain, clipboard } = require('electron');
+const { app, BaseWindow, BrowserWindow, WebContentsView, Menu, shell, dialog, ipcMain, clipboard, nativeTheme } = require('electron');
 const { spawn } = require('node:child_process');
 const { join, resolve: resolvePath, sep } = require('node:path');
 const { existsSync, mkdirSync, writeFileSync, readFileSync, symlinkSync } = require('node:fs');
@@ -307,22 +307,57 @@ function themePrefPath() {
   return join(app.getPath('userData'), 'theme.json');
 }
 
-function currentThemeId() {
+// The two house themes: one dark, one light. The ported colour schemes remain
+// choices, but these are the app's own face and what "follow the system" moves
+// between.
+const HOUSE_DARK = 'data-dense';
+const HOUSE_LIGHT = 'soft-glass';
+/** Stored under this id when the choice is "whatever the system is doing". */
+const FOLLOW_SYSTEM = 'system';
+
+function houseThemeForSystem() {
+  return nativeTheme.shouldUseDarkColors ? HOUSE_DARK : HOUSE_LIGHT;
+}
+
+/** The raw preference, which may be the sentinel rather than a theme id. */
+function themePref() {
   try {
     const saved = JSON.parse(readFileSync(themePrefPath(), 'utf8'));
     if (typeof saved.id === 'string') return saved.id;
   } catch {
     /* no preference yet */
   }
-  return 'midnight';
+  // Following the system is the honest default: the app has a light face and a
+  // dark one, and guessing which the machine wants is something the OS already
+  // knows.
+  return FOLLOW_SYSTEM;
+}
+
+function currentThemeId() {
+  const pref = themePref();
+  return pref === FOLLOW_SYSTEM ? houseThemeForSystem() : pref;
 }
 
 /** The CSS key of what we last injected, so a switch can replace it. */
 let injectedThemeKey = null;
 
+/**
+ * Follow the machine when it changes appearance — and only then. Someone who
+ * picked a specific theme chose it over the system, so flipping them to another
+ * one at sunset would be overriding a decision they already made.
+ */
+nativeTheme.on('updated', () => {
+  if (themePref() !== FOLLOW_SYSTEM) return;
+  applyTheme(FOLLOW_SYSTEM);
+});
+
 async function applyTheme(id) {
   const themes = loadThemes(userThemeDir());
-  const theme = themes.find((t) => t.id === id) ?? themes[0];
+  // `system` is a preference, not a palette: resolve it every time it is
+  // applied, so a machine that switches to dark at sunset takes effect on the
+  // next apply rather than being frozen at whatever it was when we started.
+  const wanted = id === FOLLOW_SYSTEM ? houseThemeForSystem() : id;
+  const theme = themes.find((t) => t.id === wanted) ?? themes[0];
   if (!theme) return { ok: false, reason: 'no themes available' };
 
   if (mainView && !mainView.webContents.isDestroyed()) {
@@ -338,11 +373,14 @@ async function applyTheme(id) {
   const payload = { css: panelCss(theme), terminal: terminalTheme(theme), id: theme.id };
   for (const wc of themedTargets()) wc.send('panel:theme', payload);
   try {
-    writeFileSync(themePrefPath(), JSON.stringify({ id: theme.id }));
+    // Persist what was *asked for*, not what it resolved to. Writing the
+    // resolved id would turn "follow the system" into "the theme the system
+    // happened to be on the first time", silently, on the first apply.
+    writeFileSync(themePrefPath(), JSON.stringify({ id: id === FOLLOW_SYSTEM ? FOLLOW_SYSTEM : theme.id }));
   } catch {
     /* non-fatal: the theme still applies for this run */
   }
-  return { ok: true, id: theme.id };
+  return { ok: true, id: theme.id, following: id === FOLLOW_SYSTEM };
 }
 
 /**
@@ -556,6 +594,11 @@ function wirePanelIpc() {
       swatch: [t.colors.bg, t.colors.bgRaised, t.colors.accent, t.colors.text],
     })),
     current: currentThemeId(),
+    // The picker needs to distinguish "you chose this palette" from "the system
+    // chose it for you" — otherwise following the system looks identical to
+    // having picked whichever one is showing, and there is no way back to it.
+    following: themePref() === FOLLOW_SYSTEM,
+    house: { dark: HOUSE_DARK, light: HOUSE_LIGHT, follow: FOLLOW_SYSTEM },
     dir: userThemeDir(),
   }));
 

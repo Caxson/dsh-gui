@@ -289,11 +289,45 @@ document.body.appendChild(themeMenu);
 floatingDismissers.push(() => { themeMenu.hidden = true; });
 
 async function openThemeMenu() {
-  const { themes, current, dir } = await window.dshPanel.themes();
+  const { themes, current, dir, following, house } = await window.dshPanel.themes();
   themeMenu.replaceChildren();
+
+  // First entry, because it is the default and because someone who has wandered
+  // off into the ported schemes needs a way back to "just match my machine".
+  if (house) {
+    const follow = document.createElement('button');
+    follow.className = 'menu-item theme-item' + (following ? ' on' : '');
+    const swatch = document.createElement('span');
+    swatch.className = 'theme-swatch';
+    // One dot from each house theme: the choice is between two faces, and the
+    // swatch should say which two.
+    for (const id of [house.dark, house.light]) {
+      const from = themes.find((t) => t.id === id);
+      for (const color of (from ? from.swatch : []).slice(0, 2)) {
+        const dot = document.createElement('i');
+        dot.style.background = color;
+        swatch.appendChild(dot);
+      }
+    }
+    const name = document.createElement('span');
+    name.className = 'theme-name';
+    name.textContent = '跟随系统';
+    const by = document.createElement('span');
+    by.className = 'theme-by';
+    by.textContent = following ? (themes.find((t) => t.id === current)?.name ?? '') : '深色 / 浅色';
+    follow.append(swatch, name, by);
+    follow.addEventListener('click', async () => {
+      await window.dshPanel.setTheme(house.follow);
+      themeMenu.hidden = true;
+    });
+    themeMenu.appendChild(follow);
+  }
+
   for (const t of themes) {
     const item = document.createElement('button');
-    item.className = 'menu-item theme-item' + (t.id === current ? ' on' : '');
+    // Following the system means no individual palette is the chosen one, even
+    // though one of them is currently showing.
+    item.className = 'menu-item theme-item' + (!following && t.id === current ? ' on' : '');
     const swatch = document.createElement('span');
     swatch.className = 'theme-swatch';
     // Show what it looks like instead of making someone apply each one to find
