@@ -32,6 +32,19 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify the phone boundary
+        # These drive the real relay over real sockets and ask the questions
+        # that matter: can something that is not the paired phone reach the
+        # engine, and can a room id alone drive or lock out a desktop. They were
+        # written earlier and — until this step existed — had never once run in
+        # CI, which is the same as not having them.
+        run: npm run verify:mobile
+
+      - name: Verify theme injection
+        # Adversarial: a palette is data, and data from a downloaded theme file
+        # must not be able to close a CSS rule and open its own.
+        run: npm run verify:themes
+
       - name: Run end-to-end smoke
         # The runner isolates the app's user data and DSH home itself, seeds a
         # workspace + session so the workspace-derived panes have something to
