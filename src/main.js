@@ -20,6 +20,8 @@ const { autoUpdater } = require('electron-updater');
 const { resolveBrowsersPath, isInstalled, ensureChromium } = require('./chromium');
 const { insertIntoComposer } = require('./composer');
 const { loadThemes, engineCss, panelCss, terminalTheme } = require('./themes');
+const { createPairing } = require('./mobile-pairing');
+const QRCode = require('qrcode');
 
 const APP_NAME = 'Dsh GUI';
 const APP_ROOT = join(__dirname, '..');
@@ -150,6 +152,9 @@ let stateTimer = null;
 let termTimer = null;
 let shotTimer = null;
 let lastBridgeState = null;
+// ── phone link ─────────────────────────────────────────────────────────────
+let pairing = null;      // created once userData is known (after app ready)
+let pairingWin = null;
 
 /** All live panel renderers (docked view + popped-out window). */
 function panelTargets() {
@@ -723,6 +728,82 @@ function startDshServer(dshHome, onUrl, onFail) {
   return child;
 }
 
+// ── phone link ─────────────────────────────────────────────────────────────
+
+/**
+ * The engine call the gateway is given. It is a function of the *method name*,
+ * never of anything the phone sends: the gateway resolves an allowed operation
+ * to an engine method itself, so no string from the network is ever used to
+ * build this URL.
+ */
+function engineRpc() {
+  return async (method, payload) => {
+    if (!engineUrl) throw new Error('engine not ready');
+    const res = await fetch(`${engineUrl}/api/${method}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'client-request', rpcId: `phone-${Date.now()}`, method, payload }),
+    });
+    const body = await res.json();
+    if (!body?.result?.ok) throw new Error(body?.result?.error?.message ?? `${method} failed`);
+    return body.result.value;
+  };
+}
+
+function setupPairing() {
+  pairing = createPairing({
+    userDataDir: app.getPath('userData'),
+    engineCaller: engineRpc,
+    // The secret must never reach a log file, so nothing here interpolates it —
+    // mobile-link only ever logs states, not frames.
+    log: (...args) => console.log('[dsh-gui]', ...args),
+  });
+  pairing.on((status) => {
+    if (pairingWin && !pairingWin.isDestroyed()) pairingWin.webContents.send('pairing:status', status);
+  });
+
+  ipcMain.handle('pairing:status', () => pairing.status());
+  ipcMain.handle('pairing:enable', () => { pairing.enable(); return pairing.status(); });
+  ipcMain.handle('pairing:disable', () => { pairing.disable(); return pairing.status(); });
+  ipcMain.handle('pairing:rotate', () => { pairing.rotate(); return pairing.status(); });
+  ipcMain.handle('pairing:set-relay', (_e, url) => { pairing.setRelay(url); return pairing.status(); });
+  ipcMain.handle('pairing:reveal', async () => {
+    const payload = pairing.payload();
+    if (!payload) return { payload: null, qr: null };
+    // Rendered here rather than in the page: the page has no network access and
+    // no library, and this keeps the encoder out of a renderer entirely.
+    const qr = await QRCode.toDataURL(payload, { margin: 0, width: 512, errorCorrectionLevel: 'M' });
+    return { payload, qr };
+  });
+  ipcMain.handle('pairing:copy', () => {
+    const payload = pairing.payload();
+    if (payload) clipboard.writeText(payload);
+    return Boolean(payload);
+  });
+}
+
+function openPairingWindow() {
+  if (pairingWin && !pairingWin.isDestroyed()) {
+    pairingWin.focus();
+    return;
+  }
+  pairingWin = new BrowserWindow({
+    width: 480,
+    height: 620,
+    resizable: false,
+    title: '手机连接',
+    backgroundColor: '#151517',
+    parent: win ?? undefined,
+    webPreferences: {
+      preload: join(__dirname, 'pairing', 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  pairingWin.loadFile(join(__dirname, 'pairing', 'pairing.html'));
+  pairingWin.on('closed', () => { pairingWin = null; });
+}
+
 function buildMenu() {
   const template = [
     {
@@ -744,6 +825,10 @@ function buildMenu() {
           label: '切换右侧面板',
           accelerator: 'CmdOrCtrl+B',
           click: () => togglePanel(),
+        },
+        {
+          label: '手机连接…',
+          click: () => openPairingWindow(),
         },
         { type: 'separator' },
         { role: 'hide' },
@@ -1109,6 +1194,55 @@ function createWindow() {
                   shown.panel === PANEL_WIDTH &&
                   hidden.main === win.getContentBounds().width &&
                   hidden.panel === 0;
+
+                // ── the phone link, end to end on this machine ────────────
+                // Three things can only break here and nowhere else: the link
+                // uses the global WebSocket, which has to exist in Electron's
+                // main process; the QR encoder has to survive packaging; and
+                // the pairing window has its own preload, so its IPC is not
+                // covered by any other probe. The relay is pointed at the
+                // discard port — the link is exercised without the run
+                // depending on a network service.
+                let pairingProbe = 'skipped';
+                try {
+                  const hasWebSocket = typeof WebSocket === 'function';
+                  pairing.setRelay('ws://127.0.0.1:9');
+                  const offAtStart = pairing.status().enabled === false;
+                  openPairingWindow();
+                  await new Promise((r) => pairingWin.webContents.once('did-finish-load', r));
+                  await pairingWin.webContents.executeJavaScript(
+                    `(async () => { await window.dshPairing.enable(); })()`,
+                  );
+                  const revealed = await pairingWin.webContents.executeJavaScript(
+                    `(async () => {
+                       const r = await window.dshPairing.reveal();
+                       document.getElementById('qr').src = r.qr;
+                       return {
+                         qr: String(r.qr || '').slice(0, 22),
+                         inDom: (document.getElementById('qr').src || '').slice(0, 22),
+                         // The payload carries the secret; only its shape is reported.
+                         payloadOk: /^dsh-gui:\\/\\/pair\\?/.test(r.payload || ''),
+                         state: document.getElementById('state').textContent,
+                       };
+                     })()`,
+                  );
+                  await pairingWin.webContents.executeJavaScript(
+                    `(async () => { await window.dshPairing.disable(); })()`,
+                  );
+                  const offAtEnd = pairing.status().enabled === false;
+                  const ok =
+                    hasWebSocket && offAtStart && offAtEnd &&
+                    revealed.payloadOk &&
+                    revealed.qr.startsWith('data:image/png;base64') &&
+                    revealed.inDom.startsWith('data:image/png;base64');
+                  pairingProbe = ok
+                    ? 'ok'
+                    : `see:${JSON.stringify({ hasWebSocket, offAtStart, offAtEnd, ...revealed })}`;
+                  if (pairingWin && !pairingWin.isDestroyed()) pairingWin.close();
+                } catch (err) {
+                  pairingProbe = `see:${err.message}`;
+                }
+
                 finish({
                   smoke: 'ok',
                   url: mainView.webContents.getURL(),
@@ -1123,6 +1257,7 @@ function createWindow() {
                   shellProbe,
                   replayProbe,
                   layoutProbe: layoutOk ? 'ok' : `see:${JSON.stringify({ shown, hidden })}`,
+                  pairingProbe,
                 });
               } catch (err) {
                 finish({ smoke: 'ok', ptyProbe: `error:${err.message}` });
@@ -1172,6 +1307,9 @@ if (!gotLock) {
     buildMenu();
     createWindow();
     setupAutoUpdater();
+    // Registers the IPC and reads the persisted state; it does not dial. The
+    // link only opens once the engine can actually answer — see below.
+    setupPairing();
 
     // Silent background update check on startup (packaged builds only;
     // skipped in smoke mode so tests never hit the network).
@@ -1201,6 +1339,11 @@ if (!gotLock) {
           shotTimer = setInterval(pollBrowserShot, 900);
         }
         console.log(`[dsh-gui] engine ready at ${url}`);
+        // Dial only now. Connecting earlier would put a phone in front of an
+        // engine that cannot answer, which reads as "the app is broken" rather
+        // than "it is still starting". A smoke run never opens the link: it
+        // must not depend on a network service to pass.
+        if (pairing && !SMOKE) pairing.resume();
         if (mainView && !mainView.webContents.isDestroyed()) mainView.webContents.loadURL(url);
       },
       (message) => {
@@ -1220,6 +1363,7 @@ if (!gotLock) {
       termTimer = null;
       shotTimer = null;
     }
+    if (pairing) pairing.stop();
     if (dshChild) {
       dshChild.kill('SIGTERM');
       dshChild = null;
