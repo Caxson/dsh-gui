@@ -36,6 +36,18 @@ const HOST = flag('host', '127.0.0.1')
 const ROOM_RE = /^[0-9a-f]{32}$/
 const ROLES = new Set(['agent', 'client'])
 const MAX_FRAME = 256 * 1024
+// A room id is cheap to invent — it only has to be 32 hex characters to get
+// past the shape check; being the *right* 32 characters only matters for
+// finding a peer. So anyone can ask for an unbounded number of rooms, and this
+// process shares a machine with other services. The cap is what keeps a
+// nuisance from becoming their outage.
+const MAX_ROOMS = Number(flag('max-rooms', 64))
+// nginx holds the upgraded connection open for an hour, which is right for a
+// desktop waiting on its phone and wrong for a socket whose other end died
+// without a FIN. Ping on an interval and drop the ones that stop answering.
+// Configurable so the sweep can actually be exercised by a test rather than
+// taken on faith for half a minute at a time.
+const HEARTBEAT_MS = Number(flag('heartbeat-ms', 30_000))
 
 /** room id → { agent?: WebSocket, client?: WebSocket } */
 const rooms = new Map()
@@ -80,7 +92,16 @@ http.on('upgrade', (req, socket, head) => {
     socket.destroy()
     return
   }
-  const pair = rooms.get(room) ?? {}
+  const existing = rooms.get(room)
+  if (!existing && rooms.size >= MAX_ROOMS) {
+    // Only opening a *new* room is refused. A phone arriving to join the room
+    // its desktop already holds still gets in when the relay is at capacity,
+    // so a flood degrades new pairings rather than breaking live ones.
+    socket.write('HTTP/1.1 503 Service Unavailable\r\n\r\n')
+    socket.destroy()
+    return
+  }
+  const pair = existing ?? {}
   if (pair[role] && pair[role].readyState === pair[role].OPEN) {
     // Refuse rather than replace: taking over a live role would be exactly what
     // someone holding a leaked room id would want to do.
@@ -103,6 +124,11 @@ http.on('upgrade', (req, socket, head) => {
     }
     announce()
 
+    // Liveness. `alive` is cleared before each ping and set by the pong; a
+    // socket that misses one whole interval is gone as far as we can tell.
+    ws.alive = true
+    ws.on('pong', () => { ws.alive = true })
+
     ws.on('message', (data, isBinary) => {
       const peer = peerOf(room, role)
       if (!peer || peer.readyState !== peer.OPEN) return
@@ -121,6 +147,26 @@ http.on('upgrade', (req, socket, head) => {
   })
 })
 
+// Sweep dead sockets. Without this, a peer that vanishes without closing keeps
+// its role — and its room — held for the hour nginx allows, which is both a
+// leak and a way to lock someone out of their own pairing.
+const heartbeat = setInterval(() => {
+  for (const [room, pair] of rooms) {
+    for (const role of ['agent', 'client']) {
+      const ws = pair[role]
+      if (!ws) continue
+      if (ws.alive === false) {
+        log(`! ${role} ${room.slice(0, 8)} stopped answering`)
+        ws.terminate()   // fires 'close', which cleans the room up
+        continue
+      }
+      ws.alive = false
+      ws.ping()
+    }
+  }
+}, HEARTBEAT_MS)
+heartbeat.unref()
+
 http.listen(PORT, HOST, () => {
-  log(`relay listening on ${HOST}:${PORT}`)
+  log(`relay listening on ${HOST}:${PORT} (max ${MAX_ROOMS} rooms)`)
 })

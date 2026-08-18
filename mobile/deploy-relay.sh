@@ -70,13 +70,23 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
+# The relay caps its own rooms, but that cap is code I wrote and code has bugs.
+# These are enforced by the kernel and do not depend on the relay being correct.
+# They exist because this shares a machine with a production service: the worst
+# case for a runaway relay should be the relay dying, not its neighbour.
+MemoryMax=192M
+TasksMax=64
+LimitNOFILE=1024
 
 [Install]
 WantedBy=multi-user.target
 UNIT
 
 systemctl daemon-reload
-systemctl enable --now dsh-relay
+systemctl enable dsh-relay >/dev/null
+# restart, not `enable --now`: --now leaves an already-running service alone, so
+# redeploying new relay code would have quietly kept serving the old code.
+systemctl restart dsh-relay
 sleep 2
 systemctl is-active dsh-relay >/dev/null || { echo "relay failed to start"; journalctl -u dsh-relay -n 20 --no-pager; exit 1; }
 echo "── relay running on 127.0.0.1:8500 ──"
