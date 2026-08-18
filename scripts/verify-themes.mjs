@@ -88,6 +88,36 @@ console.log('\ngenerated css:')
   check(bad.length === 0, `no shipped palette produces undefined/NaN values${bad.length ? ` (${bad.map((t) => t.id)})` : ''}`)
 }
 
+console.log('\nstyle beyond colour:')
+{
+  const neon = builtin.find((t) => t.id === 'neon-brutal')
+  check(!!neon, 'the hard-edged neon theme ships')
+  const css = panelCss(neon)
+  check(/--radius:\s*0px/.test(css), 'radius 0 reaches the stylesheet')
+  check(/--border-width:\s*2px/.test(css), 'border width reaches the stylesheet')
+  check(/--shadow-hard:\s*3px 3px 0/.test(css), 'the hard offset shadow is derived')
+  check(/text-transform:\s*uppercase/.test(css), 'uppercase labels are applied')
+  // The look must be expressible as data — needing extra CSS per theme would
+  // mean the abstraction failed.
+  check(!/neon-brutal/.test(css.replace(/--dsh-gui-theme[^;]*/g, '')), 'no rule is keyed to this theme by name')
+}
+{
+  // Style values are user input too.
+  const t = good()
+  t.style = { radius: 9999, borderWidth: -5, shadowOffset: 'x', fontScale: 99 }
+  const css = panelCss(t)
+  check(/--radius:\s*24px/.test(css), 'an absurd radius is clamped, not passed through')
+  check(/--border-width:\s*0px/.test(css), 'a negative border width is clamped')
+  check(/--shadow-hard:\s*0px 0px 0/.test(css), 'a non-numeric shadow falls back')
+  check(/--font-scale:\s*1\.25/.test(css), 'an absurd font scale is clamped')
+}
+for (const font of ['a; } body { display: none', 'url(http://evil/f.woff)', 'x".concat("', 'a{b}']) {
+  const t = good()
+  t.style = { fontUi: font }
+  const css = panelCss(t)
+  check(!css.includes(font), `font stack ${JSON.stringify(font.slice(0, 24))} is refused`)
+}
+
 if (failures.length) {
   console.error(`\n✗ ${failures.length} theme check(s) failed`)
   process.exit(1)
