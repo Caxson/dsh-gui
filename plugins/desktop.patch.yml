@@ -41,3 +41,10 @@
 - insert:
     - id: desktop-import
       name: 'dsh-gui-import'
+
+# Dsh GUI shell: custom regions inside the engine's own UI, contributed
+# through its slot system. Restyling its markup would break on every release
+# (class names are content hashed); a slot is a published contract.
+- insert:
+    - id: desktop-shell
+      name: 'dsh-gui-shell'
