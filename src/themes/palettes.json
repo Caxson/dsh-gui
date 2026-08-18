@@ -138,6 +138,46 @@
         "border": "#ded8c4", "accent": "#268bd2", "accentText": "#ffffff",
         "green": "#859900", "red": "#dc322f", "yellow": "#b58900", "purple": "#6c71c4", "cyan": "#2aa198"
       }
+    },
+
+    {
+      "$comment": "The two house themes: one dark, one light, and the defaults. The others above are ports of existing colour schemes and stay as choices; these two are the app's own face. Data-Dense Pro is what this product already is — a terminal, a diff and an activity stream, where density is the point — so it takes the family's flat near-black, fluorescent accent, tight radius and borders-not-shadows.",
+      "id": "data-dense",
+      "name": "高密数据",
+      "author": "Dsh GUI",
+      "source": "https://github.com/Caxson/dsh-gui",
+      "dark": true,
+      "style": { "radius": 4, "borderWidth": 1, "shadowOffset": 0 },
+      "colors": {
+        "bg": "#181818", "bgAlt": "#121212", "bgRaised": "#232323", "bgOverlay": "#2f2f2f",
+        "text": "#ededed", "textMuted": "#a3a3a3", "textFaint": "#6f6f6f",
+        "border": "#2f2f2f", "accent": "#faff69", "accentText": "#181818",
+        "green": "#4ade80", "red": "#ff2e93", "yellow": "#ffd60a", "purple": "#c084fc", "cyan": "#22d3ee"
+      }
+    },
+    {
+      "$comment": "The light half. Glass / Soft-Futurism rather than an inverted dark theme: a light developer tool that is only white reads as unfinished, and the washes are what make it a lit surface instead of a grey one. The glows are structured data, not a CSS gradient — see src/themes/index.js for why.",
+      "id": "soft-glass",
+      "name": "柔光玻璃",
+      "author": "Dsh GUI",
+      "source": "https://github.com/Caxson/dsh-gui",
+      "dark": false,
+      "style": {
+        "radius": 14,
+        "borderWidth": 1,
+        "shadowOffset": 0,
+        "glows": [
+          { "color": "#ffd3e8", "x": 8, "y": 0, "size": 68, "alpha": 0.5 },
+          { "color": "#d6e4ff", "x": 92, "y": 6, "size": 62, "alpha": 0.55 },
+          { "color": "#e8deff", "x": 50, "y": 104, "size": 78, "alpha": 0.4 }
+        ]
+      },
+      "colors": {
+        "bg": "#f6f7fb", "bgAlt": "#ffffff", "bgRaised": "#ffffff", "bgOverlay": "#eceffa",
+        "text": "#16181f", "textMuted": "#4d5265", "textFaint": "#858a9c",
+        "border": "#e3e6f2", "accent": "#5b6cff", "accentText": "#ffffff",
+        "green": "#12a150", "red": "#e5484d", "yellow": "#b45309", "purple": "#8b5cf6", "cyan": "#0e7490"
+      }
     }
   ]
 }

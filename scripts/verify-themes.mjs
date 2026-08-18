@@ -88,6 +88,46 @@ console.log('\ngenerated css:')
   check(bad.length === 0, `no shipped palette produces undefined/NaN values${bad.length ? ` (${bad.map((t) => t.id)})` : ''}`)
 }
 
+console.log('\nbackground washes (a theme file writes into a gradient):')
+{
+  const base = builtin.find((t) => t.id === 'soft-glass')
+  check(!!base, 'the light glass theme ships')
+  const withGlows = (glows) => panelCss({ ...base, style: { ...base.style, glows } })
+
+  check(/--bg-image:\s*radial-gradient/.test(panelCss(base)), 'a declared wash reaches the stylesheet')
+  check(
+    /--bg-image:\s*none/.test(panelCss(builtin.find((t) => t.id === 'data-dense'))),
+    'a theme without one gets `none`, not an empty value that would kill the declaration',
+  )
+
+  // The colour is the only string in the gradient, so it is the only way in.
+  for (const bad of [
+    '#fff', 'red', 'rgba(0,0,0,1)', '#ffffff, transparent), url(http://evil/x',
+    '#ffffff; } body { display: none', 'var(--x)', '', null, 12,
+  ]) {
+    const css = withGlows([{ color: bad, x: 10, y: 10, size: 50 }])
+    check(/--bg-image:\s*none/.test(css), `a glow coloured ${JSON.stringify(bad)} is dropped entirely`)
+  }
+
+  // Numbers cannot carry syntax, but they can carry nonsense.
+  const wild = withGlows([{ color: '#ffffff', x: 1e9, y: -1e9, size: 'huge', alpha: 99 }])
+  check(!/undefined|NaN|1e\+?9/.test(wild), 'out-of-range numbers are clamped, not printed')
+  check(/alpha|rgba\(255, 255, 255, 1\)/.test(wild) || /rgba\(255, 255, 255, 1\)/.test(wild),
+    'alpha is clamped into range')
+
+  const many = withGlows(Array.from({ length: 12 }, () => ({ color: '#ffffff', x: 5, y: 5, size: 40 })))
+  check((many.match(/radial-gradient/g) || []).length <= 3, 'no more than three washes are emitted')
+
+  check(!Array.isArray(withGlows('not-an-array').match(/radial-gradient/)), 'a non-array is ignored')
+
+  for (const t of builtin) {
+    const css = engineCss(t) + panelCss(t)
+    const opens = (css.match(/\(/g) || []).length
+    const closes = (css.match(/\)/g) || []).length
+    check(opens === closes, `${t.id}: parentheses stay balanced`)
+  }
+}
+
 console.log('\nstyle beyond colour:')
 {
   const neon = builtin.find((t) => t.id === 'neon-brutal')

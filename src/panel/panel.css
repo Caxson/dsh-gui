@@ -34,6 +34,9 @@
   --border-width: 1px;
   --shadow-hard: 0 0 0 transparent;
   --font-scale: 1;
+  /* Same reason as the rest of these: the theme sheet arrives after first
+     paint, and an undefined var() takes the whole declaration with it. */
+  --bg-image: none;
 }
 
 * {
@@ -45,7 +48,12 @@
 html,
 body {
   height: 100%;
-  background: var(--bg);
+  /* The wash sits over the flat colour, so a theme without one loses nothing.
+     It is what separates a lit surface from a grey rectangle — a light
+     developer tool that is only white reads as unfinished. */
+  background-color: var(--bg);
+  background-image: var(--bg-image, none);
+  background-attachment: fixed;
   color: var(--text);
   font-family: -apple-system, "SF Pro Text", "PingFang SC", sans-serif;
   font-size: 12px;
