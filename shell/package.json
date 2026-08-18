@@ -1,0 +1,21 @@
+{
+  "name": "dsh-gui-shell",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Custom regions in the engine's own UI, contributed through its slot system rather than by restyling its markup.",
+  "main": "index.js",
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime"
+      ],
+      "platform": "web"
+    }
+  }
+}

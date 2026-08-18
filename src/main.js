@@ -653,7 +653,7 @@ function seedFlowPreset(dshHome) {
  */
 function linkBridgeModules(dshHome) {
   const modulesDir = join(dshHome, 'profiles', 'node_modules');
-  for (const pkg of ['dsh-gui-bridge', 'dsh-gui-browser', 'dsh-gui-market', 'dsh-gui-flow', 'dsh-gui-import']) {
+  for (const pkg of ['dsh-gui-bridge', 'dsh-gui-browser', 'dsh-gui-market', 'dsh-gui-flow', 'dsh-gui-import', 'dsh-gui-shell']) {
     const linkPath = join(modulesDir, pkg);
     const target = join(APP_ROOT, 'node_modules', pkg);
     if (!existsSync(target) || existsSync(linkPath)) continue;
@@ -1071,6 +1071,14 @@ function createWindow() {
                     ? 'ok'
                     : `see:${JSON.stringify({ themeWas, themeNow })}`;
 
+                // Our own UI must actually render inside the engine's page.
+                // Loading the plugin proves nothing: a registration into a slot
+                // whose host is not mounted succeeds and shows nothing.
+                const shellProbe = await mainView.webContents.executeJavaScript(
+                  `document.querySelectorAll('.dshgui-shell-status').length > 0 ? 'ok' : 'see:not rendered'`,
+                  true,
+                );
+
                 // Popping the panel out must not lose the terminal history —
                 // the shared output cursor has already moved past it, so the
                 // new window only sees it if it is replayed.
@@ -1112,6 +1120,7 @@ function createWindow() {
                   quoteProbe,
                   contextMenuProbe,
                   themeProbe,
+                  shellProbe,
                   replayProbe,
                   layoutProbe: layoutOk ? 'ok' : `see:${JSON.stringify({ shown, hidden })}`,
                 });
