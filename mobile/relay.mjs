@@ -52,6 +52,15 @@ const HEARTBEAT_MS = Number(flag('heartbeat-ms', 30_000))
 /** room id → { agent?: WebSocket, client?: WebSocket } */
 const rooms = new Map()
 
+// The single verb the relay understands. Checked as bytes and bounded before
+// anything is parsed, so ordinary traffic — which is every other frame — costs
+// one length comparison and is forwarded untouched.
+const EVICT = '{"type":"relay.evict-peer"}'
+function isEvict(data) {
+  if (data.length !== EVICT.length) return false
+  return data.toString('utf8') === EVICT
+}
+
 function peerOf(room, role) {
   const pair = rooms.get(room)
   if (!pair) return null
@@ -130,6 +139,23 @@ http.on('upgrade', (req, socket, head) => {
     ws.on('pong', () => { ws.alive = true })
 
     ws.on('message', (data, isBinary) => {
+      // One exception to "the relay does not read frames", and it is worth
+      // naming. A room id is visible to whoever carries it, so someone who
+      // learns one can occupy the client role and — because a second claimant
+      // is refused — keep the actual owner out of their own pairing until they
+      // rotate the secret. The desktop is the only party that can tell an
+      // impostor from a phone (it holds the secret), and it needs some way to
+      // act on that. So the agent, and only the agent, may ask for its current
+      // client to be dropped. The relay still learns nothing: it recognises one
+      // fixed verb on a socket whose authority comes from holding the role.
+      if (role === 'agent' && !isBinary && isEvict(data)) {
+        const peer = pair.client
+        if (peer) {
+          log(`x client ${room.slice(0, 8)} evicted by agent`)
+          peer.close(4003, 'evicted')
+        }
+        return
+      }
       const peer = peerOf(room, role)
       if (!peer || peer.readyState !== peer.OPEN) return
       // Copied through untouched — the relay has no opinion about content.

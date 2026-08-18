@@ -117,6 +117,40 @@ try {
   stranger.ws.close()
   await sleep(200)
 
+  // ── eviction runs one way only ─────────────────────────────────────────
+  // The agent can drop its client, because only the agent can tell an impostor
+  // from a phone. The reverse must not work: a client that could evict would
+  // hand anyone holding the room id a way to knock the desktop off instead of
+  // merely squatting.
+  const evictRoom = roomFor('evict-test')
+  const evMac = open(evictRoom, 'agent')
+  const evPhone = open(evictRoom, 'client')
+  check((await evMac.ready) === 'open', 'evict test: the mac attaches')
+  check((await evPhone.ready) === 'open', 'evict test: the phone attaches')
+  await sleep(200)
+
+  const EVICT = '{"type":"relay.evict-peer"}'
+  evPhone.ws.send(EVICT)
+  await sleep(400)
+  check(evMac.ws.readyState === 1, 'a client cannot evict the agent')
+  check(
+    evMac.seen.includes(EVICT),
+    'and its frame is forwarded as ordinary traffic instead of being obeyed',
+  )
+
+  const phoneClosed = new Promise((r) => evPhone.ws.addEventListener('close', () => r()))
+  evMac.ws.send(EVICT)
+  await Promise.race([phoneClosed, sleep(2000)])
+  check(evPhone.ws.readyState === 3, 'the agent can evict its client')
+  check(!evPhone.seen.includes(EVICT), 'the evict verb is consumed, not forwarded to the client')
+
+  await sleep(300)
+  const rejoinAfterEvict = open(evictRoom, 'client')
+  check((await rejoinAfterEvict.ready) === 'open', 'the role is free again after an eviction')
+  rejoinAfterEvict.ws.close()
+  evMac.ws.close()
+  await sleep(200)
+
   // ── the limits that keep a nuisance off the neighbouring service ───────
   // A second relay with the limits turned down far enough to observe. The
   // caps are the whole reason this is safe to expose on a shared machine, so
