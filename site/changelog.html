@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dsh GUI 更新日志</title>
+<meta name="description" content="Dsh GUI 各版本的更新说明。">
+<link rel="icon" href="assets/logo.png">
+<style>
+  :root { --bg: #000; --fg: #f5f5f7; --muted: #9a9aa2; --line: #1e1e22; }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font-family: -apple-system, "SF Pro Text", "PingFang SC", system-ui, sans-serif;
+    line-height: 1.7; -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 0 24px; }
+  header { border-bottom: 1px solid var(--line); }
+  .bar { display: flex; align-items: center; gap: 10px; height: 64px; }
+  .bar a { color: var(--fg); text-decoration: none; font-weight: 600; font-size: 17px; letter-spacing: -.01em; }
+  .bar .back { margin-left: auto; color: var(--muted); font-weight: 400; font-size: 14.5px; }
+  .bar .back:hover { color: var(--fg); }
+  h1 { font-size: clamp(30px, 5vw, 44px); margin: 56px 0 8px; letter-spacing: -.02em; }
+  .lede { color: var(--muted); margin: 0 0 48px; }
+  .rel { padding: 26px 0; border-top: 1px solid var(--line); }
+  .rel h2 { font-size: 19px; margin: 0 0 4px; }
+  .rel time { color: #6f6f76; font-size: 13px; }
+  .rel .body { margin: 12px 0 0; color: #c9c9d1; font-size: 15px; white-space: pre-wrap; word-break: break-word; }
+  .rel .body:empty::after { content: "（无说明）"; color: #55555f; }
+  footer { border-top: 1px solid var(--line); margin-top: 56px; padding: 28px 0 60px; color: #6f6f76; font-size: 13.5px; }
+  footer a { color: #8a8a93; text-decoration: none; }
+  footer a:hover { color: var(--fg); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap bar">
+    <a href="/">Dsh GUI</a>
+    <a class="back" href="/">← 返回下载</a>
+  </div>
+</header>
+
+<main class="wrap">
+  <h1>更新日志</h1>
+  <p class="lede">每个版本改了什么。</p>
+  <div id="list"></div>
+</main>
+
+<footer>
+  <div class="wrap">Dsh GUI · MIT License · <a href="/">下载</a></div>
+</footer>
+
+<script>
+(function () {
+  // Baked at deploy time by scripts/build-site.mjs. Release notes only — no
+  // file listing and no sizes, which is the whole reason this page exists
+  // instead of sending people to the Releases page.
+  var RELEASES = /*__RELEASES__*/[]/*__RELEASES__*/;
+
+  var list = document.getElementById('list');
+  if (!RELEASES.length) {
+    list.innerHTML = '<p class="lede">暂无更新记录。</p>';
+    return;
+  }
+  RELEASES.forEach(function (r) {
+    var el = document.createElement('section');
+    el.className = 'rel';
+    var h = document.createElement('h2');
+    h.textContent = r.name || r.tag;
+    var t = document.createElement('time');
+    t.textContent = r.date || '';
+    var b = document.createElement('div');
+    b.className = 'body';
+    b.textContent = r.body || '';
+    el.append(h, t, b);
+    list.appendChild(el);
+  });
+})();
+</script>
+
+</body>
+</html>

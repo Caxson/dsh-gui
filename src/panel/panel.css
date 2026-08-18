@@ -879,6 +879,26 @@ body {
 .file-head:hover .card-ref,
 .tree-ref:focus-visible { opacity: 1; }
 
+/* ── theme picker ──────────────────────────────────────────────────────── */
+.theme-menu { min-width: 236px; max-height: 62vh; overflow-y: auto; }
+.theme-item { gap: 10px; }
+.theme-item.on { background: var(--bg-hover); }
+.theme-swatch { display: inline-flex; flex: none; border-radius: 4px; overflow: hidden; }
+.theme-swatch i { display: block; width: 9px; height: 15px; }
+.theme-name { flex: 1 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.theme-by { flex: none; color: var(--text-dim); font-size: 10.5px; }
+.theme-hint {
+  margin: 4px 4px 0;
+  padding: 7px 9px 3px;
+  border-top: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 10.5px;
+  line-height: 1.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* Floating offer to quote the current selection into the chat. */
 .quote-btn {
   position: fixed;

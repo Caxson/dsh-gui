@@ -18,7 +18,12 @@
  * it was published. So the page is built from the artifacts actually being
  * released, and the feed is consulted only for the version number.
  *
- * Usage: node scripts/build-site.mjs <artifactsDir> [out.html]
+ * It also emits changelog.html. The download page used to send people to the
+ * GitHub Releases page for older versions, and that page lists every asset with
+ * its size — so the one number the download page deliberately never shows was
+ * two clicks away the whole time. The changelog carries release notes only.
+ *
+ * Usage: node scripts/build-site.mjs <artifactsDir> [out.html] [releases.json]
  */
 
 import { readFileSync, writeFileSync, mkdirSync, cpSync, existsSync, readdirSync } from 'node:fs'
@@ -49,8 +54,42 @@ function versionFrom(dir) {
   return [...found][0]
 }
 
+const RELEASES_MARKER = /\/\*__RELEASES__\*\/[\s\S]*?\/\*__RELEASES__\*\//
+
+/**
+ * `gh release list --json` output → what the changelog shows. Notes only:
+ * no asset list, no sizes, and no links back to a page that has them.
+ */
+function changelogFrom(jsonPath) {
+  if (!jsonPath || !existsSync(jsonPath)) return []
+  let raw
+  try {
+    raw = JSON.parse(readFileSync(jsonPath, 'utf8'))
+  } catch (err) {
+    console.warn(`! ignoring release list: ${err.message}`)
+    return []
+  }
+  if (!Array.isArray(raw)) return []
+  // Accepts either shape: the REST list (snake_case, carries the notes) or
+  // `gh release list --json` (camelCase, does not).
+  return raw
+    .filter((r) => !(r.isDraft ?? r.draft) && !(r.isPrerelease ?? r.prerelease))
+    .map((r) => ({
+      tag: String(r.tagName ?? r.tag_name ?? ''),
+      name: String(r.name ?? r.tagName ?? r.tag_name ?? ''),
+      date: String(r.publishedAt ?? r.published_at ?? '').slice(0, 10),
+      // Auto-generated notes link commits and contributors, which is fine, but
+      // strip the asset section if a hand-written note ever includes one.
+      body: String(r.body ?? '')
+        .split(/\n#+\s*(?:Assets|资产|下载)\b/i)[0]
+        .trim()
+        .slice(0, 4000),
+    }))
+    .filter((r) => r.tag)
+}
+
 function main() {
-  const [dir, outPath = join(ROOT, 'dist-site', 'index.html')] = process.argv.slice(2)
+  const [dir, outPath = join(ROOT, 'dist-site', 'index.html'), releasesPath] = process.argv.slice(2)
   if (!dir) {
     console.error('usage: node scripts/build-site.mjs <artifactsDir> [out.html]')
     process.exit(2)
@@ -79,8 +118,18 @@ function main() {
   const assets = join(ROOT, 'site', 'assets')
   if (existsSync(assets)) cpSync(assets, join(outDir, 'assets'), { recursive: true })
 
+  // Changelog, so "all versions" stays on a page we control.
+  const releases = changelogFrom(releasesPath)
+  const changelogSrc = readFileSync(join(ROOT, 'site', 'changelog.html'), 'utf8')
+  if (!RELEASES_MARKER.test(changelogSrc)) throw new Error('site/changelog.html has no /*__RELEASES__*/ marker')
+  writeFileSync(
+    join(outDir, 'changelog.html'),
+    changelogSrc.replace(RELEASES_MARKER, `/*__RELEASES__*/${JSON.stringify(releases)}/*__RELEASES__*/`),
+  )
+
   console.log(`✓ site built for ${version} → ${outPath}`)
   for (const f of files) console.log(`  offers ${f.url}`)
+  console.log(`  changelog: ${releases.length} release(s)`)
 }
 
 main()

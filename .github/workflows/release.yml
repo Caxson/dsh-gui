@@ -211,7 +211,18 @@ jobs:
       # feeds: the feeds list what the updater needs (mac .zip, installer only)
       # while the page lists what a person installs (.dmg, both .exe flavours).
       - name: Build the download page
-        run: node scripts/build-site.mjs out dist-site/index.html
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Release notes for our own changelog page. The download page links
+          # there instead of to GitHub Releases, whose asset table shows the
+          # file sizes the page deliberately never mentions. Best-effort: no
+          # notes simply means an empty changelog, never a failed release.
+          # The REST list carries the notes; `gh release list --json` does not
+          # expose a body field, so it would have produced an empty changelog.
+          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=30" \
+            > releases.json || echo '[]' > releases.json
+          node scripts/build-site.mjs out dist-site/index.html releases.json
 
       - name: Upload artifacts to the Release
         env:

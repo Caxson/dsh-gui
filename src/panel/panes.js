@@ -64,7 +64,9 @@
     return wrap;
   }
 
-  const XTERM_THEME = {
+  // Replaced when a theme arrives; the literal below is the starting point for
+  // terminals opened before the first theme message lands.
+  let XTERM_THEME = {
     background: '#151517', foreground: '#dfe3e8',
     cursor: '#4176e6', cursorAccent: '#151517',
     selectionBackground: 'rgba(65, 118, 230, 0.32)',
@@ -98,6 +100,7 @@
       term.loadAddon(fit);
     }
     term.open(termHost);
+    liveTerminals.add(term); // so a later theme switch reaches this one too
     term.onData((d) => window.dshPanel.ptyInput(ptyId, d));
     term.onResize(({ cols, rows }) => window.dshPanel.ptyResize(ptyId, cols, rows));
 
@@ -118,7 +121,7 @@
       onResize: refit,
       write(data) { term.write(data); },
       setCwd(text) { status.textContent = text; },
-      dispose() { term.dispose(); },
+      dispose() { liveTerminals.delete(term); term.dispose(); },
     };
   }
 
@@ -632,8 +635,19 @@
     };
   }
 
+  /** Live terminals, so a theme switch reaches the ones already open. */
+  const liveTerminals = new Set();
+
+  function applyTerminalTheme(theme) {
+    XTERM_THEME = theme;
+    for (const term of liveTerminals) {
+      try { term.options.theme = theme; } catch { /* a disposed terminal */ }
+    }
+  }
+
   window.dshPanes = {
     createTerminalPane, createFilesPane, createTreePane, createWebPane, createSidechatPane,
+    applyTerminalTheme, liveTerminals,
     // Shared so the selection-quote affordance in panel.js reports success and
     // failure exactly the way the per-row buttons do.
     sendRef, workspaceRelative,

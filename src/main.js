@@ -19,12 +19,12 @@ const { existsSync, mkdirSync, writeFileSync, readFileSync, symlinkSync } = requ
 const { autoUpdater } = require('electron-updater');
 const { resolveBrowsersPath, isInstalled, ensureChromium } = require('./chromium');
 const { insertIntoComposer } = require('./composer');
+const { loadThemes, engineCss, panelCss, terminalTheme } = require('./themes');
 
 const APP_NAME = 'Dsh GUI';
 const APP_ROOT = join(__dirname, '..');
 const DSH_BIN = join(APP_ROOT, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js');
 const PATCH_FILE = join(APP_ROOT, 'plugins', 'desktop.patch.yml');
-const SKIN_CSS = join(APP_ROOT, 'src', 'codex-skin.css');
 
 // Test/CI hooks (no effect in normal use): redirect Chromium user data and
 // disable the Chromium sandbox so the app can run inside a restricted file
@@ -277,6 +277,57 @@ async function pollTerminalOut() {
   }
 }
 
+// ── themes ────────────────────────────────────────────────────────────────
+// A theme is a palette; src/themes turns it into engine tokens, panel
+// variables and a terminal palette. Switching one re-injects those, so it takes
+// effect without a restart.
+
+/** Where a user drops their own theme files. */
+function userThemeDir() {
+  return join(app.getPath('userData'), 'themes');
+}
+
+function themePrefPath() {
+  return join(app.getPath('userData'), 'theme.json');
+}
+
+function currentThemeId() {
+  try {
+    const saved = JSON.parse(readFileSync(themePrefPath(), 'utf8'));
+    if (typeof saved.id === 'string') return saved.id;
+  } catch {
+    /* no preference yet */
+  }
+  return 'midnight';
+}
+
+/** The CSS key of what we last injected, so a switch can replace it. */
+let injectedThemeKey = null;
+
+async function applyTheme(id) {
+  const themes = loadThemes(userThemeDir());
+  const theme = themes.find((t) => t.id === id) ?? themes[0];
+  if (!theme) return { ok: false, reason: 'no themes available' };
+
+  if (mainView && !mainView.webContents.isDestroyed()) {
+    try {
+      // Remove the previous sheet first; insertCSS stacks otherwise, and the
+      // older rule would keep winning wherever specificity ties.
+      if (injectedThemeKey) await mainView.webContents.removeInsertedCSS(injectedThemeKey);
+      injectedThemeKey = await mainView.webContents.insertCSS(engineCss(theme));
+    } catch (err) {
+      console.warn('[dsh-gui] theme injection failed:', err.message);
+    }
+  }
+  sendToPanels('panel:theme', { css: panelCss(theme), terminal: terminalTheme(theme), id: theme.id });
+  try {
+    writeFileSync(themePrefPath(), JSON.stringify({ id: theme.id }));
+  } catch {
+    /* non-fatal: the theme still applies for this run */
+  }
+  return { ok: true, id: theme.id };
+}
+
 /**
  * Give a freshly attached panel renderer the terminal history it missed.
  *
@@ -478,6 +529,20 @@ function wirePanelIpc() {
       return { error: err.message };
     }
   });
+
+  ipcMain.handle('panel:themes', () => ({
+    themes: loadThemes(userThemeDir()).map((t) => ({
+      id: t.id, name: t.name, author: t.author ?? '', source: t.source ?? '',
+      dark: t.dark !== false, custom: !!t.custom,
+      // A few colours so the picker can show what it looks like rather than
+      // making the user apply each one to find out.
+      swatch: [t.colors.bg, t.colors.bgRaised, t.colors.accent, t.colors.text],
+    })),
+    current: currentThemeId(),
+    dir: userThemeDir(),
+  }));
+
+  ipcMain.handle('panel:theme-set', (_e, id) => applyTheme(typeof id === 'string' ? id : ''));
 
   ipcMain.handle('panel:copy-text', (_e, text) => {
     if (typeof text !== 'string' || !text) return { ok: false, reason: 'empty' };
@@ -781,13 +846,7 @@ function createWindow() {
   );
 
   mainView.webContents.on('did-finish-load', async () => {
-    if (existsSync(SKIN_CSS)) {
-      try {
-        await mainView.webContents.insertCSS(readFileSync(SKIN_CSS, 'utf8'));
-      } catch (err) {
-        console.warn('[dsh-gui] skin injection failed:', err.message);
-      }
-    }
+    await applyTheme(currentThemeId());
     // The splash (data: URL) also fires did-finish-load — the probe must only
     // run once the real engine page is up, or its typed input hits a dropped
     // engineUrl and the terminal read comes back empty.
@@ -973,6 +1032,45 @@ function createWindow() {
                     ? 'ok'
                     : `see:${JSON.stringify({ ref, refResult, composer, before, after, seed: smokeSeed })}`;
 
+                // A theme must actually reach the engine's page. Read the token
+                // it sets before and after switching: the panel updating its
+                // own colours would prove nothing about the main view.
+                const readToken = `(() => {
+                  const mine = [];
+                  for (const sheet of document.styleSheets) {
+                    let rules; try { rules = sheet.cssRules; } catch { continue; }
+                    for (const r of rules) {
+                      if (r.style && r.style.getPropertyValue('--dsw-alias-bg-base') && !sheet.href) {
+                        mine.push(r.selectorText + ' => ' + r.style.getPropertyValue('--dsw-alias-bg-base').trim());
+                      }
+                    }
+                  }
+                  const cs = getComputedStyle(document.body);
+                  return JSON.stringify({
+                    computed: cs.getPropertyValue('--dsw-alias-bg-base').trim(),
+                    marker: cs.getPropertyValue('--dsh-gui-theme').trim(),
+                    dark: document.body.hasAttribute('data-ds-dark-theme'),
+                  });
+                })()`;
+                const themeBefore = await mainView.webContents.executeJavaScript(readToken, true);
+                const switched = await applyTheme('dracula');
+                await new Promise((r) => setTimeout(r, 400));
+                const themeAfter = await mainView.webContents.executeJavaScript(readToken, true);
+                await applyTheme(themeBefore ? 'midnight' : 'midnight');
+                const parseTheme = (raw) => {
+                  try { return JSON.parse(raw); } catch { return {}; }
+                };
+                const themeWas = parseTheme(themeBefore);
+                const themeNow = parseTheme(themeAfter);
+                // A pass means the engine's own token changed to the new
+                // palette's colour — not merely that our sheet was applied,
+                // which was true even while the engine kept winning.
+                const themeProbe = !switched.ok
+                  ? `see:${switched.reason}`
+                  : themeNow.computed && themeNow.computed.toLowerCase() === '#282a36' && themeWas.computed !== themeNow.computed
+                    ? 'ok'
+                    : `see:${JSON.stringify({ themeWas, themeNow })}`;
+
                 // Popping the panel out must not lose the terminal history —
                 // the shared output cursor has already moved past it, so the
                 // new window only sees it if it is replayed.
@@ -1013,6 +1111,7 @@ function createWindow() {
                   backflowProbe,
                   quoteProbe,
                   contextMenuProbe,
+                  themeProbe,
                   replayProbe,
                   layoutProbe: layoutOk ? 'ok' : `see:${JSON.stringify({ shown, hidden })}`,
                 });

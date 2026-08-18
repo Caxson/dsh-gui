@@ -269,6 +269,76 @@ window.addEventListener('resize', () => {
   if (tab) tab.pane.onResize();
 });
 
+// ── themes ────────────────────────────────────────────────────────────────
+// Main derives everything from a palette and pushes it here: a stylesheet for
+// this document and a colour set for xterm. Applied live — no reload.
+const themeStyle = document.createElement('style');
+document.head.appendChild(themeStyle);
+
+window.dshPanel.onTheme((payload) => {
+  if (!payload) return;
+  themeStyle.textContent = payload.css || '';
+  if (payload.terminal) window.dshPanes.applyTerminalTheme(payload.terminal);
+});
+
+const themeBtn = document.getElementById('theme-btn');
+const themeMenu = document.createElement('div');
+themeMenu.className = 'menu theme-menu';
+themeMenu.hidden = true;
+document.body.appendChild(themeMenu);
+floatingDismissers.push(() => { themeMenu.hidden = true; });
+
+async function openThemeMenu() {
+  const { themes, current, dir } = await window.dshPanel.themes();
+  themeMenu.replaceChildren();
+  for (const t of themes) {
+    const item = document.createElement('button');
+    item.className = 'menu-item theme-item' + (t.id === current ? ' on' : '');
+    const swatch = document.createElement('span');
+    swatch.className = 'theme-swatch';
+    // Show what it looks like instead of making someone apply each one to find
+    // out. Colours come from main, already validated as plain hex.
+    for (const color of t.swatch) {
+      const dot = document.createElement('i');
+      dot.style.background = color;
+      swatch.appendChild(dot);
+    }
+    const name = document.createElement('span');
+    name.className = 'theme-name';
+    name.textContent = t.name;
+    const by = document.createElement('span');
+    by.className = 'theme-by';
+    by.textContent = t.custom ? '自定义' : t.author || '';
+    if (t.source) item.title = `${t.name} — ${t.author}\n${t.source}`;
+    item.append(swatch, name, by);
+    item.addEventListener('click', async () => {
+      themeMenu.hidden = true;
+      await window.dshPanel.setTheme(t.id);
+    });
+    themeMenu.appendChild(item);
+  }
+  const hint = document.createElement('div');
+  hint.className = 'theme-hint';
+  hint.textContent = `把 .json 主题放进 ${dir} 即可出现在这里`;
+  hint.title = dir;
+  themeMenu.appendChild(hint);
+
+  themeMenu.hidden = false;
+  const rect = themeBtn.getBoundingClientRect();
+  const box = themeMenu.getBoundingClientRect();
+  themeMenu.style.left = `${Math.max(6, Math.min(rect.left, window.innerWidth - box.width - 6))}px`;
+  themeMenu.style.top = `${Math.min(rect.bottom + 6, window.innerHeight - box.height - 6)}px`;
+}
+
+if (themeBtn) {
+  themeBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!themeMenu.hidden) { themeMenu.hidden = true; return; }
+    openThemeMenu();
+  });
+  themeMenu.addEventListener('click', (e) => e.stopPropagation());
+}
+
 // ── quote a selection into the chat ───────────────────────────────────────
 // Seeing something in a diff or in terminal output and asking about it should
 // not mean retyping it. Selecting text anywhere in the panel offers to send it,
