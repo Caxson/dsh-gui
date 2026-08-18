@@ -196,15 +196,15 @@
       </p>
       <p class="lede small">开源、本地运行，引擎只监听 127.0.0.1。</p>
 
-      <div class="btns">
+      <!-- Every build is a button. An earlier version put the platform the
+           visitor was not on into a line of small grey text underneath, which
+           is technically "reachable" and practically invisible: someone looking
+           for a Windows download did not find one. -->
+      <div class="btns" id="downloads">
         <a id="primary" class="btn" href="#" aria-disabled="true">正在获取最新版本…</a>
-        <a id="secondary" class="btn ghost" href="#" hidden></a>
       </div>
       <p class="sub" id="meta"></p>
-      <!-- Anything the two buttons above cannot hold lands here, so no build is
-           ever unreachable just because the visitor is on another platform. -->
-      <p class="alts" id="alts" hidden></p>
-      <a class="textlink" href="https://github.com/Caxson/dsh-gui/releases">查看全部版本与更新日志 ›</a>
+      <a class="textlink" href="/changelog.html">查看全部版本与更新日志 ›</a>
     </div>
 
     <div class="visual">
@@ -315,7 +315,7 @@
     <span>Dsh GUI · MIT License</span>
     <span>
       <a href="https://github.com/Caxson/dsh-gui">GitHub</a> ·
-      <a href="https://github.com/Caxson/dsh-gui/releases">全部版本</a> ·
+      <a href="/changelog.html">全部版本</a> ·
       <a href="https://github.com/deepseek-ai/deepseek-harness">DSH 引擎</a>
     </span>
   </div>
@@ -349,10 +349,9 @@
   // document; the live fetch below only upgrades an already-deployed page.
   var BAKED = /*__FEED__*/null/*__FEED__*/;
 
+  var downloads = document.getElementById('downloads');
   var primary = document.getElementById('primary');
-  var secondary = document.getElementById('secondary');
   var meta = document.getElementById('meta');
-  var alts = document.getElementById('alts');
 
   /** Apple Silicon detection, Rosetta included (translated JS reports Intel). */
   function isAppleSilicon() {
@@ -405,21 +404,22 @@
     return null;
   }
 
-  function setLink(el, v) {
-    el.textContent = '下载 ' + v.label;
-    el.href = BASE + v.url;
-    el.setAttribute('download', '');
-    el.removeAttribute('aria-disabled');
-    el.hidden = false;
+  function button(v, primaryStyle) {
+    var a = document.createElement('a');
+    a.className = primaryStyle ? 'btn' : 'btn ghost';
+    a.textContent = v.label;
+    a.href = BASE + v.url;
+    a.setAttribute('download', '');
+    return a;
   }
 
   function degrade(msg) {
+    downloads.replaceChildren(primary);
     primary.textContent = '前往 GitHub 下载';
     primary.href = RELEASES;
     primary.removeAttribute('aria-disabled');
     primary.removeAttribute('download');
-    secondary.hidden = true;
-    alts.hidden = true;
+    primary.hidden = false;
     meta.textContent = msg;
   }
 
@@ -429,32 +429,21 @@
 
     var os = visitorOS();
     var silicon = isAppleSilicon();
+    // Order: the visitor's own platform first, then everything else — but every
+    // build gets a button. Nothing is demoted to small print.
     var mine = all.filter(function (v) { return v.os === os; });
-    // Not a platform we ship, or none matched → lead with the Mac build, the
-    // common case; everything else still shows up in the alternates row.
     if (!mine.length) mine = all.filter(function (v) { return v.os === 'mac'; });
     if (!mine.length) mine = all.slice();
-
-    // On a Mac, put the chip we detected first; Rosetta and unknown chips fall
-    // back to Apple Silicon, which is the majority.
     if (os === 'mac' && silicon === false) {
       mine = mine.slice().sort(function (a, b) { return /Intel/.test(b.label) - /Intel/.test(a.label); });
     }
+    var rest = all.filter(function (v) { return mine.indexOf(v) === -1; });
+    var ordered = mine.concat(rest);
 
-    setLink(primary, mine[0]);
-    if (mine[1]) setLink(secondary, mine[1]); else secondary.hidden = true;
-
-    // Everything not already on a button — the whole point is that no build is
-    // invisible just because the visitor is on another platform.
-    var rest = all.filter(function (v) { return v !== mine[0] && v !== mine[1]; });
-    if (rest.length) {
-      alts.innerHTML = '其他平台：' + rest.map(function (v) {
-        return '<a href="' + BASE + v.url + '" download>' + v.label + '</a>';
-      }).join('<span class="sep">·</span>');
-      alts.hidden = false;
-    } else {
-      alts.hidden = true;
-    }
+    downloads.replaceChildren.apply(
+      downloads,
+      ordered.map(function (v, i) { return button(v, i === 0); }),
+    );
 
     var note = (os === 'mac' && silicon === null) ? ' · 未能识别芯片，已默认 Apple 芯片版' : '';
     meta.innerHTML = '版本 <b>' + feed.version + '</b> · ' + mine[0].need + note;
