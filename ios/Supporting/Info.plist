@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  Xcode still generates the rest of Info.plist from the build settings and
+	  merges it into this file; only what cannot be expressed as an
+	  INFOPLIST_KEY_ setting lives here. CFBundleURLTypes is an array, so it
+	  cannot.
+
+	  Registering the scheme means a pairing link is openable: tapped from a
+	  message, or handed to a booted simulator with `simctl openurl`, which is
+	  what makes the pairing path testable without a camera.
+	-->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>com.merefusion.dshgui.pair</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>dsh-gui</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>
