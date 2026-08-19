@@ -46,7 +46,31 @@ if (!existsSync(binary)) {
 // Scratch directories: the check must not read or write anyone's real sessions,
 // and must be identical on a fresh machine and a developer's.
 const scratch = mkdtempSync(join(tmpdir(), 'dsh-gui-pkg-'))
-const cleanup = () => rmSync(scratch, { recursive: true, force: true })
+
+/**
+ * Tidying up must never decide the verdict. The first version removed the
+ * scratch directory the instant after killing the app, while it was still
+ * writing into it — `rmdir` raised ENOTEMPTY and failed a release whose package
+ * had just booted correctly. A leftover temp directory is not a reason to block
+ * a release; the answer to "does it start" had already been yes.
+ */
+function cleanup() {
+  try {
+    rmSync(scratch, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+  } catch (err) {
+    console.warn(`(could not remove ${scratch}: ${err.code ?? err.message} — ignoring)`)
+  }
+}
+
+/** Give the process a moment to die before touching what it was writing to. */
+function stop(proc) {
+  return new Promise((resolve) => {
+    if (proc.exitCode !== null || proc.signalCode !== null) return resolve()
+    const done = setTimeout(resolve, 3000)
+    proc.once('exit', () => { clearTimeout(done); setTimeout(resolve, 300) })
+    try { proc.kill('SIGTERM') } catch { clearTimeout(done); resolve() }
+  })
+}
 
 const BOOT_TIMEOUT_MS = 180_000
 
@@ -66,11 +90,11 @@ const child = spawn(binary, [], {
 let output = ''
 let settled = false
 
-const finish = (ok, message) => {
+const finish = async (ok, message) => {
   if (settled) return
   settled = true
   clearTimeout(timer)
-  try { child.kill('SIGTERM') } catch { /* already gone */ }
+  await stop(child)
   cleanup()
   if (ok) {
     console.log(`\n✓ ${message}`)
