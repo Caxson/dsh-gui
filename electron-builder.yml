@@ -19,7 +19,13 @@ files:
   # would trade size for a broken feature. LICENSE files stay, for compliance.
   - '!**/*.{map,d.ts,d.mts,d.cts,tsbuildinfo}'
   - '!**/{README,readme,CHANGELOG,changelog,HISTORY}*'
-  - '!**/{test,tests,__tests__,spec,example,examples,docs,doc}/**'
+  # `doc` and `docs` were in this list and must never go back. A directory name
+  # is not a statement about what is inside it: `yaml/dist/doc/` is the YAML
+  # document model — real code, required by its own composer. Dropping it built
+  # an app that died on launch with `Cannot find module '../doc/directives.js'`,
+  # and it shipped that way from v1.4.0 to v1.5.3 because every release gate
+  # checked file sizes and URLs and none of them started the app.
+  - '!**/{test,tests,__tests__,spec,example,examples}/**'
   - '!**/{.github,.vscode,.idea}/**'
 
 # Chromium for the browser pane is NOT bundled: it is ~355MB, roughly 40% of
