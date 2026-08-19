@@ -1,6 +1,6 @@
 {
   "name": "dsh-gui",
-  "version": "1.5.3",
+  "version": "1.6.0",
   "description": "Dsh GUI — a Codex-like macOS desktop GUI for DeepSeek Harness (DSH). The DSH engine is the kernel; this app is a plugin layer on top of it.",
   "repository": {
     "type": "git",
@@ -27,7 +27,8 @@
     "dist:dir": "electron-builder --mac dir",
     "verify:mobile": "node scripts/verify-mobile-gateway.mjs && node scripts/verify-mobile-relay.mjs && node scripts/verify-mobile-link.mjs",
     "verify:themes": "node scripts/verify-themes.mjs",
-  "verify:ios": "node scripts/verify-ios-client.mjs"
+    "verify:ios": "node scripts/verify-ios-client.mjs",
+    "verify:package": "node scripts/verify-package.mjs"
   },
   "dependencies": {
     "@deepseek-ai/cordis-plugin-group": "1.0.1",

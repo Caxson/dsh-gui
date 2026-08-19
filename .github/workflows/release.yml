@@ -93,6 +93,24 @@ jobs:
             CSC_IDENTITY_AUTO_DISCOVERY=false npx electron-builder --mac --$ARCH -c.mac.notarize=false --publish never
           fi
 
+      - name: Boot the app that was just built
+        # Before anything is staged, published or mirrored. Every other gate in
+        # this pipeline measures the artifact — its size, its checksum, whether
+        # its URL resolves — and none of those can tell a working installer from
+        # a broken one. v1.4.0 through v1.5.3 were all correctly sized,
+        # correctly listed and completely dead on launch, because the file
+        # filter dropped a directory named `doc` that happened to be code.
+        # This starts the binary and requires the engine to come up.
+        # Located rather than hardcoded: electron-builder writes arm64 to
+        # dist/mac-arm64 and x64 to dist/mac, so a templated path would silently
+        # skip one of the two architectures — which is the same class of mistake
+        # this step exists to catch.
+        run: |
+          set -euo pipefail
+          app=$(ls -d dist/mac*/*.app | head -1)
+          echo "verifying $app"
+          node scripts/verify-package.mjs "$app"
+
       - name: Stage artifacts
         run: |
           set -euo pipefail
