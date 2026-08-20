@@ -1319,8 +1319,12 @@ function createWindow() {
                 // Opening a file hands it to another application, so the check
                 // that matters is the refusal, not the success. Never actually
                 // launch anything from a test run.
-                const outside = await ipcMain._invokeHandlers.get('panel:open-path')(
-                  {}, '/etc/passwd',
+                // Driven through the panel's own bridge rather than by reaching
+                // into ipcMain's private handler map: that map is not API and
+                // would break on an Electron upgrade, and going through the
+                // preload covers the wiring as well as the check.
+                const outside = await panelView.webContents.executeJavaScript(
+                  `window.dshPanel.openPath('/etc/passwd')`,
                 );
                 const openProbe =
                   outside && outside.ok === false && outside.reason === 'outside-workspace'
