@@ -27,6 +27,7 @@
     "dist:dir": "electron-builder --mac dir",
     "verify:mobile": "node scripts/verify-mobile-gateway.mjs && node scripts/verify-mobile-relay.mjs && node scripts/verify-mobile-link.mjs",
     "verify:themes": "node scripts/verify-themes.mjs",
+    "verify:shell": "node scripts/verify-shell-status.mjs",
     "verify:ios": "node scripts/verify-ios-client.mjs",
     "verify:package": "node scripts/verify-package.mjs"
   },
