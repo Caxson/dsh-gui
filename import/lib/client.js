@@ -123,12 +123,16 @@ window.__ModuleLoader__.load({
         fontSize: 12, padding: '5px 16px', borderRadius: 7, cursor: 'pointer',
         border: '1px solid rgba(128,138,160,0.3)', background: 'transparent', color: 'inherit',
       },
+      // Sized, not stretched. `width: 100%` here made this button claim the
+      // whole footer line, which left the workspace status beside it with two
+      // characters of room. The footer is a shared row: take what you need.
       footerBtn: function (wide) {
         return {
-          display: 'flex', alignItems: 'center', justifyContent: wide ? 'flex-start' : 'center',
-          gap: 8, width: '100%', padding: wide ? '7px 10px' : '7px 0',
-          border: 'none', borderRadius: 8, background: 'transparent',
-          color: 'inherit', font: 'inherit', fontSize: 12.5, cursor: 'pointer', opacity: 0.85,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          gap: 6, flex: 'none', height: 26, padding: wide ? '0 8px' : '0 5px',
+          border: 'none', borderRadius: 6, background: 'transparent',
+          color: 'inherit', font: 'inherit', fontSize: 11.5, lineHeight: '26px',
+          whiteSpace: 'nowrap', cursor: 'pointer', opacity: 0.85,
         }
       },
     }
@@ -302,7 +306,9 @@ window.__ModuleLoader__.load({
     exports.apply = function apply(ctx) {
       ctx.slots.inject('sidebar.footer.action', function () {
         return ctx.slots.register(
-          { name: 'sidebar.footer.action', id: 'session-import', order: 90, label: '导入会话' },
+          // Sits with the other pressable things at the left of the row; the
+          // workspace status takes the far end.
+          { name: 'sidebar.footer.action', id: 'session-import', order: 20, label: '导入会话' },
           ImportButton,
         )
       })
