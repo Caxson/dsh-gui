@@ -30,6 +30,9 @@ contextBridge.exposeInMainWorld('dshPanel', {
   // Main owns the width, so the page is told when it becomes a rail rather
   // than trying to infer it from its own size.
   onLayout: (fn) => ipcRenderer.on('panel:layout', (_e, layout) => fn(layout)),
+  // …and asks for it once at boot, because that first telling lands before
+  // this page can listen.
+  layoutState: () => ipcRenderer.invoke('panel:layout-state'),
   // Hand a workspace file to whatever the OS opens it with.
   openPath: (absPath) => ipcRenderer.invoke('panel:open-path', absPath),
   popOut: () => ipcRenderer.send('panel:popout'),
@@ -43,6 +46,7 @@ contextBridge.exposeInMainWorld('dshPanel', {
   themes: () => ipcRenderer.invoke('panel:themes'),
   setTheme: (id) => ipcRenderer.invoke('panel:theme-set', id),
   onTheme: (fn) => ipcRenderer.on('panel:theme', (_e, payload) => fn(payload)),
+  themeState: () => ipcRenderer.invoke('panel:theme-state'),
 
   // Desktop actions. Main owns the clipboard and validates the reveal path
   // against the workspace before handing it to the OS.

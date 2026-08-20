@@ -266,11 +266,18 @@ function renderRail() {
 
 const RAIL_GLYPH = { terminal: '>_', tree: '⌘', web: '◐', sidechat: '✳' };
 
-window.dshPanel.onLayout(({ collapsed }) => {
+function applyLayout({ collapsed }) {
   document.body.classList.toggle('collapsed', collapsed === true);
   rail.hidden = collapsed !== true;
   if (collapsed) renderRail();
-});
+}
+
+window.dshPanel.onLayout(applyLayout);
+
+// Ask once at boot. Main lays the views out while this page is still loading,
+// so the push that goes with that first layout has nobody to receive it — and
+// the panel would sit at rail width still wearing its expanded shape.
+window.dshPanel.layoutState().then(applyLayout).catch(() => {});
 
 /** Why an open was refused, in words rather than a code. */
 function describeOpenFailure(result) {
@@ -346,11 +353,19 @@ window.addEventListener('resize', () => {
 const themeStyle = document.createElement('style');
 document.head.appendChild(themeStyle);
 
-window.dshPanel.onTheme((payload) => {
+function applyThemePayload(payload) {
   if (!payload) return;
   themeStyle.textContent = payload.css || '';
   if (payload.terminal) window.dshPanes.applyTerminalTheme(payload.terminal);
-});
+}
+
+window.dshPanel.onTheme(applyThemePayload);
+
+// The theme is applied during startup, which can be before this page is
+// listening. Missing it is not obvious — the fallback palette in :root keeps
+// everything legible — so the panel would just sit a shade off from the rest
+// of the window, wearing the wrong accent colour, for the whole session.
+window.dshPanel.themeState().then(applyThemePayload).catch(() => {});
 
 const themeBtn = document.getElementById('theme-btn');
 const themeMenu = document.createElement('div');

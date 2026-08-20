@@ -366,6 +366,9 @@ nativeTheme.on('updated', () => {
   applyTheme(FOLLOW_SYSTEM);
 });
 
+// The most recent theme payload, for renderers that were not listening yet.
+let lastThemePayload = null;
+
 async function applyTheme(id) {
   const themes = loadThemes(userThemeDir());
   // `system` is a preference, not a palette: resolve it every time it is
@@ -386,7 +389,22 @@ async function applyTheme(id) {
     }
   }
   const payload = { css: panelCss(theme), terminal: terminalTheme(theme), id: theme.id };
+  // Kept so a renderer that boots after this ran can ask for it. Every themed
+  // page carries a fallback palette in its own `:root` — a page that misses
+  // the push does not look broken, it looks *slightly wrong*: the collapsed
+  // rail came out a shade darker than the engine with a blue glyph on it, and
+  // read as leftover UI rather than as a theme that never arrived.
+  lastThemePayload = payload;
   for (const wc of themedTargets()) wc.send('panel:theme', payload);
+  // The view's own background is what shows before the page paints, and it was
+  // pinned to one dark hex — a light theme opened onto a black slab.
+  if (panelView && theme.colors && theme.colors.bg) {
+    try {
+      panelView.setBackgroundColor(theme.colors.bg);
+    } catch {
+      /* a destroyed view is not worth failing a theme change over */
+    }
+  }
   try {
     // Persist what was *asked for*, not what it resolved to. Writing the
     // resolved id would turn "follow the system" into "the theme the system
@@ -624,6 +642,23 @@ function wirePanelIpc() {
   });
 
   ipcMain.handle('panel:visible', () => panelVisible);
+
+  // The panel asks for its own layout as it boots. It used to only be told —
+  // and the telling happens during the first layout pass, before the page has
+  // a listener, so a cold start left the page in its expanded shape inside a
+  // 40px view: a squeezed header where the rail should be. Pulling makes the
+  // order of the two irrelevant.
+  // Answered per sender: the popped-out window runs this same page, and it is
+  // never a rail — handing it the docked panel's collapsed state would make it
+  // open as a 40px sliver inside a full-size window.
+  ipcMain.handle('panel:layout-state', (e) => {
+    const docked = panelView && !panelView.webContents.isDestroyed() && e.sender === panelView.webContents;
+    return { collapsed: docked ? !panelVisible : false };
+  });
+
+  // Same reason, for colour. Null when no theme has been applied yet, in which
+  // case the page's own fallback palette is the right answer.
+  ipcMain.handle('panel:theme-state', () => lastThemePayload);
 
   ipcMain.handle('panel:copy-text', (_e, text) => {
     if (typeof text !== 'string' || !text) return { ok: false, reason: 'empty' };
@@ -1290,37 +1325,16 @@ function createWindow() {
                   true,
                 );
 
-                // The rail is the only way back once the panel is closed, so
-                // "it collapsed" is not the thing worth asserting — "there is
-                // still a button" is.
-                togglePanel();
-                await new Promise((r) => setTimeout(r, 400));
-                const railState = await panelView.webContents.executeJavaScript(
-                  `(() => {
-                     const rail = document.getElementById('rail');
-                     const btn = document.getElementById('rail-expand');
-                     const box = btn && btn.getBoundingClientRect();
-                     return {
-                       collapsed: document.body.classList.contains('collapsed'),
-                       railShown: !!rail && !rail.hidden,
-                       // A control that exists but has no area cannot be clicked.
-                       clickable: !!box && box.width > 8 && box.height > 8,
-                       headerHidden: getComputedStyle(document.querySelector('.panel-header')).display === 'none',
-                     };
-                   })()`,
-                );
-                togglePanel();
-                await new Promise((r) => setTimeout(r, 300));
-                const railProbe =
-                  railState.collapsed && railState.railShown && railState.clickable && railState.headerHidden
-                    ? 'ok'
-                    : `see:${JSON.stringify(railState)}`;
 
                 // Opening a file hands it to another application, so the check
                 // that matters is the refusal, not the success. Never actually
                 // launch anything from a test run.
-                const outside = await ipcMain._invokeHandlers.get('panel:open-path')(
-                  {}, '/etc/passwd',
+                // Driven through the panel's own bridge rather than by reaching
+                // into ipcMain's private handler map: that map is not API and
+                // would break on an Electron upgrade, and going through the
+                // preload covers the wiring as well as the check.
+                const outside = await panelView.webContents.executeJavaScript(
+                  `window.dshPanel.openPath('/etc/passwd')`,
                 );
                 const openProbe =
                   outside && outside.ok === false && outside.reason === 'outside-workspace'
@@ -1343,6 +1357,22 @@ function createWindow() {
                 const replayProbe = popupTerm.includes('PANEL_PTY_OK')
                   ? 'ok'
                   : `see:${popupTerm.slice(0, 120) || '(empty)'}`;
+
+                // The popped-out window runs the panel page too, and asks main
+                // for its layout on boot like the docked one does. It must not
+                // be answered with the dock's state: a window that opened as a
+                // 40px rail would have no way to show anything.
+                let popoutShapeProbe = 'skipped';
+                if (popupWin && !popupWin.isDestroyed()) {
+                  const shape = await popupWin.webContents.executeJavaScript(
+                    `(() => ({
+                       collapsed: document.body.classList.contains('collapsed'),
+                       railShown: !!document.getElementById('rail') && !document.getElementById('rail').hidden,
+                     }))()`,
+                  );
+                  popoutShapeProbe =
+                    !shape.collapsed && !shape.railShown ? 'ok' : `see:${JSON.stringify(shape)}`;
+                }
                 if (popupWin && !popupWin.isDestroyed()) popupWin.destroy();
 
                 // layout probe: the panel must take space from the window,
@@ -1419,6 +1449,110 @@ function createWindow() {
                   pairingProbe = `see:${err.message}`;
                 }
 
+                // Reproduce a cold start, deterministically.
+                //
+                // The bug being guarded is "a panel renderer that comes up
+                // after main has already decided things is never told" — and by
+                // this point smoke has opened the panel, which *pushed* both
+                // layout and theme, so reading the page now would prove
+                // nothing. A reload gives a fresh renderer with no push
+                // following it: exactly the first-launch situation. Everything
+                // it knows afterwards, it had to have asked for.
+                //
+                // Collapse it first. A fresh page comes up expanded, so with
+                // the panel open the page's default agrees with main by
+                // accident and the check passes without testing anything. The
+                // states have to disagree for silence to be detectable.
+                const panelWasVisible = panelVisible;
+                if (panelVisible) togglePanel();
+                await new Promise((resolve) => {
+                  panelView.webContents.once('did-finish-load', resolve);
+                  panelView.webContents.reload();
+                });
+                // The boot pulls are promises; give them a chance to land.
+                for (let i = 0; i < 20; i++) {
+                  const ready = await panelView.webContents.executeJavaScript(
+                    `!!document.body.className || !!getComputedStyle(document.documentElement).getPropertyValue('--accent')`,
+                  );
+                  if (ready) break;
+                  await new Promise((r) => setTimeout(r, 100));
+                }
+
+                // The panel must be wearing the *applied* theme by the time it
+                // is first seen — not its own fallback palette. Missing the
+                // theme push is invisible to every other check: the fallback
+                // keeps the panel perfectly legible, just a shade off the rest
+                // of the window and carrying the wrong accent. Compare against
+                // what main actually sent rather than against a constant, so a
+                // new default palette does not need this line changed.
+                const wantAccent = /--accent:\s*([^;]+);/.exec(
+                  (lastThemePayload && lastThemePayload.css) || '',
+                );
+                const gotAccent = await panelView.webContents.executeJavaScript(
+                  `getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()`,
+                );
+                const themeAtBootProbe =
+                  wantAccent && gotAccent && gotAccent === wantAccent[1].trim()
+                    ? 'ok'
+                    : `see:${JSON.stringify({ want: wantAccent && wantAccent[1], got: gotAccent })}`;
+
+                // The rail is the only way back once the panel is closed, so
+                // "it collapsed" is not the thing worth asserting — "there is
+                // still a button" is.
+                //
+                // Read it *before* touching anything. The panel starts
+                // collapsed, and this probe used to toggle first — which meant
+                // it only ever exercised the push, and shipped a cold start
+                // where the page never learned it was a rail and rendered a
+                // squeezed header instead.
+                //
+                // The assertion is agreement, not a fixed value: main owns
+                // whether the panel is open, and the page must already be
+                // drawing that same state. The shipped bug was exactly this
+                // disagreement — main had it at rail width while the page still
+                // wore its expanded shape.
+                const expectCollapsed = !panelVisible;
+                const railAtBoot = await panelView.webContents.executeJavaScript(
+                  `(() => ({
+                     collapsed: document.body.classList.contains('collapsed'),
+                     railShown: !!document.getElementById('rail') && !document.getElementById('rail').hidden,
+                   }))()`,
+                );
+                const bootAgrees =
+                  railAtBoot.collapsed === expectCollapsed && railAtBoot.railShown === expectCollapsed;
+
+                // Now the push path, which is a different mechanism and can
+                // break on its own: open it and close it again.
+                togglePanel();
+                await new Promise((r) => setTimeout(r, 300));
+                togglePanel();
+                await new Promise((r) => setTimeout(r, 400));
+                const railState = await panelView.webContents.executeJavaScript(
+                  `(() => {
+                     const rail = document.getElementById('rail');
+                     const btn = document.getElementById('rail-expand');
+                     const box = btn && btn.getBoundingClientRect();
+                     return {
+                       collapsed: document.body.classList.contains('collapsed'),
+                       railShown: !!rail && !rail.hidden,
+                       // A control that exists but has no area cannot be clicked.
+                       clickable: !!box && box.width > 8 && box.height > 8,
+                       headerHidden: getComputedStyle(document.querySelector('.panel-header')).display === 'none',
+                     };
+                   })()`,
+                );
+                // Leave the panel as smoke found it — later probes drive it.
+                if (panelWasVisible) togglePanel();
+                await new Promise((r) => setTimeout(r, 300));
+                const railProbe =
+                  bootAgrees &&
+                  railState.collapsed &&
+                  railState.railShown &&
+                  railState.clickable &&
+                  railState.headerHidden
+                    ? 'ok'
+                    : `see:${JSON.stringify({ boot: railAtBoot, expectCollapsed, toggled: railState })}`;
+
                 finish({
                   smoke: 'ok',
                   url: mainView.webContents.getURL(),
@@ -1434,6 +1568,8 @@ function createWindow() {
                   replayProbe,
                   layoutProbe: layoutOk ? 'ok' : `see:${JSON.stringify({ shown, hidden })}`,
                   appearanceProbe,
+                  themeAtBootProbe,
+                  popoutShapeProbe,
                   railProbe,
                   openProbe,
                   pairingProbe,

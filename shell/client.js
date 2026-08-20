@@ -37,7 +37,10 @@ window.__ModuleLoader__.load({
 			if (typeof path !== "string") return "";
 			const short = home && path.startsWith(home) ? "~" + path.slice(home.length) : path;
 			// Keep the tail: the end of a path identifies it, the start repeats.
-			return short.length > 34 ? "…" + short.slice(-33) : short;
+			// The cap has to do the trimming, not CSS — `text-overflow` cuts the
+			// end, which is the half worth keeping. CSS ellipsis stays only as a
+			// backstop for a narrow window.
+			return short.length > 24 ? "…" + short.slice(-23) : short;
 		}
 
 		/**
@@ -84,7 +87,6 @@ window.__ModuleLoader__.load({
 				className: CLASS,
 				title: (state && state.cwd) || "",
 				children: [
-					jsx.jsx("span", { className: `${CLASS}-dot` }),
 					jsx.jsx("span", { className: `${CLASS}-text`, children: workspace || "Dsh GUI" }),
 					changed > 0
 						? jsx.jsx("span", { className: `${CLASS}-count`, children: String(changed) })
@@ -104,16 +106,22 @@ window.__ModuleLoader__.load({
 			const style = document.createElement("style");
 			style.id = id;
 			style.textContent = `
+				/* The footer row is one flex line ~256px wide, and everything in
+				   it competes for that. So it is split by kind: what you press
+				   sits left at a fixed size, what you read is pushed to the far
+				   edge and takes whatever is left. Before this the workspace was
+				   a plain flex item next to a full-width button and got squeezed
+				   down to two characters — a status line that said "Ds…". */
 				.${CLASS} {
 					display: flex; align-items: center; gap: 6px;
-					min-width: 0; padding: 4px 8px; border-radius: 6px;
-					font-size: 11px; line-height: 1.4;
-					color: var(--dsw-alias-text-3, #81858c);
-				}
-				.${CLASS}-dot {
-					width: 6px; height: 6px; border-radius: 50%;
-					background: var(--dsw-alias-brand-primary, #4176e6);
-					flex: none;
+					margin-left: auto; flex: 0 1 auto;
+					min-width: 0; height: 26px; padding: 0 2px;
+					/* A path is machine output: monospace, per DESIGN.md's data
+					   role. The CJK fallback is explicit — a latin-only mono
+					   would drop Chinese path segments to a different face. */
+					font-family: "SF Mono", ui-monospace, Menlo, "PingFang SC", monospace;
+					font-size: 10.5px; line-height: 26px;
+					color: var(--dsw-alias-label-tertiary, #81858c);
 				}
 				.${CLASS}-text {
 					min-width: 0; overflow: hidden;
@@ -123,6 +131,8 @@ window.__ModuleLoader__.load({
 					flex: none; padding: 0 5px; border-radius: 7px;
 					background: var(--dsw-alias-brand-primary, #4176e6);
 					color: #fff; font-size: 9.5px; font-weight: 600; line-height: 14px;
+					font-family: "SF Mono", ui-monospace, Menlo, monospace;
+					font-variant-numeric: tabular-nums;
 				}
 
 				/* Appearance. Every colour comes from the engine's own tokens, which
@@ -265,8 +275,10 @@ window.__ModuleLoader__.load({
 			// names accept a registration and never show it, because their host
 			// only mounts in some views.
 			ctx.slots.inject("sidebar.footer.action", () => {
+				// Last in the row, and it pushes itself to the far edge: actions
+				// on the left, the thing you only read on the right.
 				ctx.slots.register(
-					{ name: "sidebar.footer.action", id: "dsh-gui-status", order: 20 },
+					{ name: "sidebar.footer.action", id: "dsh-gui-status", order: 90 },
 					ShellStatus,
 				);
 				// Lower order so appearance sits at the far left of the footer,
