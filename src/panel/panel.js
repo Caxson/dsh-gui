@@ -223,6 +223,77 @@ document.getElementById('popout-btn').addEventListener('click', () => {
   window.dshPanel.popOut();
 });
 
+/**
+ * A transient message at the foot of the panel.
+ *
+ * The panel had no way to say that something failed — every action either
+ * worked or did nothing visible, which reads as the app being broken rather
+ * than as the action being refused.
+ */
+let toastTimer = null;
+function toast(text) {
+  const el = document.getElementById('toast');
+  if (!el) return;
+  el.textContent = text;
+  el.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.hidden = true; }, 3200);
+}
+
+// ── collapsed rail ────────────────────────────────────────────────────────
+const rail = document.getElementById('rail');
+const railTabs = document.getElementById('rail-tabs');
+document.getElementById('rail-expand').addEventListener('click', () => {
+  window.dshPanel.collapsePanel();
+});
+
+/** One button per open tab, so the rail says what is behind it. Clicking one
+ *  expands the panel onto that tab rather than onto whatever was last shown. */
+function renderRail() {
+  railTabs.replaceChildren();
+  for (const tab of tabs) {
+    const dot = document.createElement('button');
+    dot.className = 'rail-tab' + (tab.tabId === activeTabId ? ' on' : '');
+    dot.title = tab.title || tab.type;
+    dot.textContent = RAIL_GLYPH[tab.type] ?? '•';
+    dot.addEventListener('click', () => {
+      activateTab(tab.tabId);
+      window.dshPanel.collapsePanel();
+    });
+    railTabs.appendChild(dot);
+  }
+}
+
+const RAIL_GLYPH = { terminal: '>_', tree: '⌘', web: '◐', sidechat: '✳' };
+
+window.dshPanel.onLayout(({ collapsed }) => {
+  document.body.classList.toggle('collapsed', collapsed === true);
+  rail.hidden = collapsed !== true;
+  if (collapsed) renderRail();
+});
+
+/** Why an open was refused, in words rather than a code. */
+function describeOpenFailure(result) {
+  return {
+    'no-workspace': '还没有工作区',
+    'outside-workspace': '这个文件不在当前工作区里',
+    missing: '文件已经不存在了',
+    empty: '路径为空',
+  }[result && result.reason] ?? (result && result.reason) ?? '打不开';
+}
+
+/** Hand a file to the OS, from the context menu. */
+async function openWithSystem(absolute) {
+  const result = await window.dshPanel.openPath(absolute);
+  if (!result || !result.ok) toast(`打不开：${describeOpenFailure(result)}`);
+}
+
+// The tree lives in panes.js and has no message area of its own; it reports a
+// failed open here rather than growing its own way to talk to the user.
+window.addEventListener('dsh-open-failed', (e) => {
+  toast(`打不开：${describeOpenFailure(e.detail)}`);
+});
+
 // ── event routing ─────────────────────────────────────────────────────────
 window.dshPanel.onPtyData((ptyId, data) => {
   for (const tab of tabs) {
@@ -497,6 +568,8 @@ document.addEventListener('contextmenu', (e) => {
     { label: '复制路径', run: () => window.dshPanel.copyText(rel) },
   ];
   if (absolute) {
+    // First, because it is what someone reaching for a file usually wants.
+    items.unshift({ label: '用默认应用打开', run: () => openWithSystem(absolute) });
     items.push({ label: '复制绝对路径', run: () => window.dshPanel.copyText(absolute) });
     items.push({
       label: navigator.platform.startsWith('Win') ? '在文件资源管理器中显示' : '在访达中显示',

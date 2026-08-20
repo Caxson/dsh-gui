@@ -352,6 +352,21 @@
       return { r, chev };
     }
 
+    /**
+     * Open a workspace file with whatever the machine already uses for it —
+     * Preview for a PDF, an image viewer for a screenshot, an editor for
+     * source. A viewer built into this panel would be a worse version of
+     * software already installed.
+     */
+    function openFile(rel, root) {
+      if (!root) return;
+      window.dshPanel.openPath(`${root}/${rel}`).then((result) => {
+        if (result && result.ok) return;
+        // Surfaced by the panel shell, which owns the transient message area.
+        window.dispatchEvent(new CustomEvent('dsh-open-failed', { detail: result }));
+      });
+    }
+
     function fmtSize(n) {
       if (n < 1024) return `${n} B`;
       if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
@@ -388,7 +403,13 @@
         const childPath = path ? `${path}/${entry.name}` : entry.name;
         const { r, chev } = row(entry, childPath, depth);
         into.appendChild(r);
-        if (!entry.dir) continue;
+        if (!entry.dir) {
+          // Double-click, the way a file manager behaves. Single-click would
+          // launch another application on a stray click, and a file row has to
+          // stay safe to click — it is also how you select one to reference.
+          r.addEventListener('dblclick', () => openFile(childPath, data.root));
+          continue;
+        }
 
         const kids = el('div', 'tree-kids');
         kids.hidden = !open.has(childPath);

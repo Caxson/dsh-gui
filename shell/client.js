@@ -17,6 +17,7 @@ window.__ModuleLoader__.load({
 		const React = require("react");
 
 		const CLASS = "dshgui-shell-status";
+		const CLASS_A = "dshgui-shell-appearance";
 		// The desktop bridge already serves this, and a client plugin runs on
 		// the same origin as the engine — so what is shown below is the app's
 		// real state, not a decorative figure.
@@ -123,8 +124,138 @@ window.__ModuleLoader__.load({
 					background: var(--dsw-alias-brand-primary, #4176e6);
 					color: #fff; font-size: 9.5px; font-weight: 600; line-height: 14px;
 				}
+
+				/* Appearance. Every colour comes from the engine's own tokens, which
+				   our theme sheet already overrides — so this control is themed by
+				   the very thing it switches. */
+				.${CLASS_A}-wrap { position: relative; display: flex; }
+				.${CLASS_A}-btn {
+					display: flex; align-items: center; justify-content: center;
+					width: 26px; height: 26px; padding: 0;
+					border: 0; border-radius: 6px; background: transparent;
+					color: var(--dsw-alias-label-tertiary, #adb2b8); cursor: pointer;
+				}
+				.${CLASS_A}-btn:hover {
+					background: var(--dsw-alias-interactive-bg-hover, rgba(255,255,255,.08));
+					color: var(--dsw-alias-label-primary, #ebeef2);
+				}
+				.${CLASS_A}-menu {
+					position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 50;
+					min-width: 190px; max-height: 320px; overflow-y: auto;
+					padding: 4px; border-radius: 8px;
+					background: var(--dsw-specific-menu, #353638);
+					border: 1px solid var(--dsw-alias-border-l1, rgba(255,255,255,.13));
+					box-shadow: 0 10px 28px rgba(0,0,0,.34);
+				}
+				.${CLASS_A}-item {
+					display: flex; align-items: baseline; gap: 8px; width: 100%;
+					padding: 6px 9px; border: 0; border-radius: 5px;
+					background: transparent; cursor: pointer; text-align: left;
+					color: var(--dsw-alias-label-primary, #ebeef2); font-size: 12px;
+				}
+				.${CLASS_A}-item:hover {
+					background: var(--dsw-alias-interactive-bg-hover, rgba(255,255,255,.08));
+				}
+				.${CLASS_A}-item.on { color: var(--dsw-alias-brand-text, #4176e6); }
+				.${CLASS_A}-name { flex: 1; min-width: 0; }
+				.${CLASS_A}-note {
+					flex: none; font-size: 10px;
+					color: var(--dsw-alias-label-tertiary, #81858c);
+				}
 			`;
 			document.head.appendChild(style);
+		}
+
+		/**
+		 * Appearance, in the sidebar's footer.
+		 *
+		 * It used to live in the right panel's header — which is collapsed by
+		 * default, so the only way to reach the ten themes the app ships was to
+		 * open a panel you had no reason to open. The sidebar footer is the one
+		 * place always on screen.
+		 *
+		 * `dshGuiHost` is the desktop app's preload. Outside the app — this
+		 * plugin also loads in a plain browser — it is absent and the control
+		 * renders nothing rather than a button that cannot work.
+		 */
+		function ShellAppearance() {
+			const host = typeof window !== "undefined" ? window.dshGuiHost : null;
+			const [open, setOpen] = React.useState(false);
+			const [data, setData] = React.useState(null);
+
+			const load = React.useCallback(async () => {
+				if (!host) return;
+				try {
+					setData(await host.themes());
+				} catch {
+					setData(null);
+				}
+			}, [host]);
+
+			React.useEffect(() => {
+				if (!host) return undefined;
+				load();
+				// Follow changes made anywhere else — the panel's own picker, or
+				// the system flipping to dark at sunset.
+				host.onHostState(() => load());
+				const dismiss = () => setOpen(false);
+				window.addEventListener("click", dismiss);
+				return () => window.removeEventListener("click", dismiss);
+			}, [host, load]);
+
+			if (!host) return null;
+
+			const choose = async (id) => {
+				setOpen(false);
+				await host.setTheme(id);
+				load();
+			};
+
+			const themes = (data && data.themes) || [];
+			const house = data && data.house;
+			const current = data && data.current;
+			const following = data && data.following;
+
+			const item = (id, label, note, on) =>
+				jsx.jsxs("button", {
+					className: `${CLASS_A}-item${on ? " on" : ""}`,
+					onClick: (e) => { e.stopPropagation(); choose(id); },
+					children: [
+						jsx.jsx("span", { className: `${CLASS_A}-name`, children: label }),
+						note ? jsx.jsx("span", { className: `${CLASS_A}-note`, children: note }) : null,
+					],
+				});
+
+			return jsx.jsxs("div", {
+				className: `${CLASS_A}-wrap`,
+				children: [
+					jsx.jsx("button", {
+						className: `${CLASS_A}-btn`,
+						title: "外观",
+						"aria-label": "外观",
+						onClick: (e) => { e.stopPropagation(); setOpen(!open); },
+						children: jsx.jsxs("svg", {
+							width: 15, height: 15, viewBox: "0 0 16 16", fill: "none", "aria-hidden": "true",
+							children: [
+								jsx.jsx("circle", { cx: 8, cy: 8, r: 5.3, stroke: "currentColor", strokeWidth: 1.4 }),
+								jsx.jsx("path", { d: "M8 2.7a5.3 5.3 0 0 1 0 10.6z", fill: "currentColor" }),
+							],
+						}),
+					}),
+					open
+						? jsx.jsxs("div", {
+								className: `${CLASS_A}-menu`,
+								onClick: (e) => e.stopPropagation(),
+								children: [
+									house ? item(house.follow, "跟随系统", "深色 / 浅色", following === true) : null,
+									...themes.map((t) =>
+										item(t.id, t.name, t.author || "", !following && t.id === current),
+									),
+								],
+						  })
+						: null,
+				],
+			});
 		}
 
 		function apply(ctx) {
@@ -133,12 +264,18 @@ window.__ModuleLoader__.load({
 			// slot nobody renders is a silent no-op — measured: several slot
 			// names accept a registration and never show it, because their host
 			// only mounts in some views.
-			ctx.slots.inject("sidebar.footer.action", () =>
+			ctx.slots.inject("sidebar.footer.action", () => {
 				ctx.slots.register(
 					{ name: "sidebar.footer.action", id: "dsh-gui-status", order: 20 },
 					ShellStatus,
-				),
-			);
+				);
+				// Lower order so appearance sits at the far left of the footer,
+				// where the window's other bottom-left controls already are.
+				ctx.slots.register(
+					{ name: "sidebar.footer.action", id: "dsh-gui-appearance", order: 10 },
+					ShellAppearance,
+				);
+			});
 		}
 
 		// The runtime refuses `ctx.slots` unless the plugin declares it here:
@@ -149,6 +286,7 @@ window.__ModuleLoader__.load({
 		exports.inject = inject;
 		exports.apply = apply;
 		exports.ShellStatus = ShellStatus;
+		exports.ShellAppearance = ShellAppearance;
 		exports.countChangedFiles = countChangedFiles;
 		return module.exports;
 	},
