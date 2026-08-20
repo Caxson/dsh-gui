@@ -134,6 +134,9 @@ let bootLog = [];
 
 // ── Codex-style right panel (tabbed: 终端 / 文件 / 浏览器 / 侧边聊天) ────────
 const PANEL_WIDTH = 400;
+// What is left on screen when the panel is collapsed: wide enough for one
+// icon button, narrow enough not to be in the way.
+const RAIL_WIDTH = 40;
 let panelView = null;
 let popupWin = null; // panel popped out into its own window
 let chromiumInstall = null; // in-flight on-demand Chromium download, if any
@@ -182,15 +185,15 @@ function themedTargets() {
 function layoutViews() {
   if (!win || win.isDestroyed()) return;
   const { width, height } = win.getContentBounds();
-  const mainW = Math.max(0, width - (panelVisible ? PANEL_WIDTH : 0));
+  // Collapsed is a rail, not nothing. At zero width the panel left no trace of
+  // itself, so the only way back was a keyboard shortcut or a menu — a feature
+  // you cannot see is a feature most people never find.
+  const panelW = panelVisible ? PANEL_WIDTH : RAIL_WIDTH;
+  const mainW = Math.max(0, width - panelW);
   if (mainView) mainView.setBounds({ x: 0, y: 0, width: mainW, height });
-  if (panelView) {
-    panelView.setBounds({
-      x: mainW,
-      y: 0,
-      width: panelVisible ? PANEL_WIDTH : 0,
-      height,
-    });
+  if (panelView) panelView.setBounds({ x: mainW, y: 0, width: panelW, height });
+  if (panelView && !panelView.webContents.isDestroyed()) {
+    panelView.webContents.send('panel:layout', { collapsed: !panelVisible });
   }
 }
 
@@ -222,11 +225,23 @@ function createPanelView() {
 function togglePanel() {
   panelVisible = !panelVisible;
   layoutViews();
+  broadcastHostState();
   try {
     writeFileSync(panelPrefPath(), JSON.stringify({ panelVisible }));
   } catch {
     /* non-fatal */
   }
+}
+
+/** Tell the engine page what the app looks like right now, so its injected
+ *  controls show the real state instead of polling for it. */
+function broadcastHostState() {
+  if (!mainView || mainView.webContents.isDestroyed()) return;
+  mainView.webContents.send('host:state', {
+    panelVisible,
+    themeId: currentThemeId(),
+    following: themePref() === FOLLOW_SYSTEM,
+  });
 }
 
 function panelPrefPath() {
@@ -602,7 +617,13 @@ function wirePanelIpc() {
     dir: userThemeDir(),
   }));
 
-  ipcMain.handle('panel:theme-set', (_e, id) => applyTheme(typeof id === 'string' ? id : ''));
+  ipcMain.handle('panel:theme-set', async (_e, id) => {
+    const result = await applyTheme(typeof id === 'string' ? id : '');
+    broadcastHostState();
+    return result;
+  });
+
+  ipcMain.handle('panel:visible', () => panelVisible);
 
   ipcMain.handle('panel:copy-text', (_e, text) => {
     if (typeof text !== 'string' || !text) return { ok: false, reason: 'empty' };
@@ -625,6 +646,29 @@ function wirePanelIpc() {
     if (!existsSync(resolved)) return { ok: false, reason: 'missing' };
     shell.showItemInFolder(resolved);
     return { ok: true };
+  });
+
+  // Open a workspace file with whatever the OS uses for it — Preview for a
+  // PDF, an image viewer for a screenshot, an editor for source. Building a
+  // viewer inside the panel would mean re-implementing, badly, software the
+  // machine already has.
+  //
+  // Same containment check as reveal, and for a stronger reason: this hands a
+  // file to another application. A path from outside the workspace is refused
+  // rather than clamped, because there is no correct file to substitute.
+  ipcMain.handle('panel:open-path', async (_e, absPath) => {
+    const root = lastBridgeState && lastBridgeState.cwd;
+    if (!root) return { ok: false, reason: 'no-workspace' };
+    if (typeof absPath !== 'string' || !absPath) return { ok: false, reason: 'empty' };
+    const resolved = resolvePath(absPath);
+    if (resolved !== root && !resolved.startsWith(root + sep)) {
+      return { ok: false, reason: 'outside-workspace' };
+    }
+    if (!existsSync(resolved)) return { ok: false, reason: 'missing' };
+    // openPath resolves to '' on success and to a message on failure; it does
+    // not throw, so a silent no-op is the failure mode to guard against.
+    const problem = await shell.openPath(resolved);
+    return problem ? { ok: false, reason: problem } : { ok: true };
   });
 
   // Backflow: the panel hands a reference (a file path, a diff excerpt) to the
@@ -945,6 +989,10 @@ function createWindow() {
 
   mainView = new WebContentsView({
     webPreferences: {
+      // The engine page hosts our sidebar controls, so it needs a way to reach
+      // the app. The preload is deliberately tiny — see src/host/preload.js for
+      // why the surface stays that way.
+      preload: join(__dirname, 'host', 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -1227,6 +1275,58 @@ function createWindow() {
                   true,
                 );
 
+                // The appearance control has to be *in the engine's sidebar*,
+                // not merely registered. It also needs the host bridge: without
+                // the preload it renders nothing, which would look identical to
+                // a slot that never mounted.
+                const appearanceProbe = await mainView.webContents.executeJavaScript(
+                  `(() => {
+                     const host = typeof window.dshGuiHost === 'object' && window.dshGuiHost !== null;
+                     const el = document.querySelectorAll('.dshgui-shell-appearance-wrap').length;
+                     const fns = host && ['themes','setTheme','togglePanel'].every(
+                       (k) => typeof window.dshGuiHost[k] === 'function');
+                     return (host && fns && el > 0) ? 'ok' : 'see:' + JSON.stringify({ host, fns, el });
+                   })()`,
+                  true,
+                );
+
+                // The rail is the only way back once the panel is closed, so
+                // "it collapsed" is not the thing worth asserting — "there is
+                // still a button" is.
+                togglePanel();
+                await new Promise((r) => setTimeout(r, 400));
+                const railState = await panelView.webContents.executeJavaScript(
+                  `(() => {
+                     const rail = document.getElementById('rail');
+                     const btn = document.getElementById('rail-expand');
+                     const box = btn && btn.getBoundingClientRect();
+                     return {
+                       collapsed: document.body.classList.contains('collapsed'),
+                       railShown: !!rail && !rail.hidden,
+                       // A control that exists but has no area cannot be clicked.
+                       clickable: !!box && box.width > 8 && box.height > 8,
+                       headerHidden: getComputedStyle(document.querySelector('.panel-header')).display === 'none',
+                     };
+                   })()`,
+                );
+                togglePanel();
+                await new Promise((r) => setTimeout(r, 300));
+                const railProbe =
+                  railState.collapsed && railState.railShown && railState.clickable && railState.headerHidden
+                    ? 'ok'
+                    : `see:${JSON.stringify(railState)}`;
+
+                // Opening a file hands it to another application, so the check
+                // that matters is the refusal, not the success. Never actually
+                // launch anything from a test run.
+                const outside = await ipcMain._invokeHandlers.get('panel:open-path')(
+                  {}, '/etc/passwd',
+                );
+                const openProbe =
+                  outside && outside.ok === false && outside.reason === 'outside-workspace'
+                    ? 'ok'
+                    : `see:${JSON.stringify(outside)}`;
+
                 // Popping the panel out must not lose the terminal history —
                 // the shared output cursor has already moved past it, so the
                 // new window only sees it if it is replayed.
@@ -1252,11 +1352,15 @@ function createWindow() {
                 togglePanel();
                 const hidden = { main: mainView.getBounds().width, panel: panelView.getBounds().width, win: win.getContentBounds().width };
                 togglePanel();
+                // Collapsed leaves a rail, not nothing. Asserting the exact
+                // width rather than "> 0" is the point: a rail that is there
+                // but a pixel wide would pass a looser check and still leave
+                // no way to reopen the panel.
                 const layoutOk =
                   shown.main === winW - PANEL_WIDTH &&
                   shown.panel === PANEL_WIDTH &&
-                  hidden.main === win.getContentBounds().width &&
-                  hidden.panel === 0;
+                  hidden.main === win.getContentBounds().width - RAIL_WIDTH &&
+                  hidden.panel === RAIL_WIDTH;
 
                 // ── the phone link, end to end on this machine ────────────
                 // Three things can only break here and nowhere else: the link
@@ -1329,6 +1433,9 @@ function createWindow() {
                   shellProbe,
                   replayProbe,
                   layoutProbe: layoutOk ? 'ok' : `see:${JSON.stringify({ shown, hidden })}`,
+                  appearanceProbe,
+                  railProbe,
+                  openProbe,
                   pairingProbe,
                 });
               } catch (err) {

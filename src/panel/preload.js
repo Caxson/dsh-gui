@@ -27,6 +27,11 @@ contextBridge.exposeInMainWorld('dshPanel', {
   tabChanged: (tab) => ipcRenderer.send('panel:tab', tab),
   openTerminals: (ids) => ipcRenderer.send('panel:terminals', ids),
   collapsePanel: () => ipcRenderer.send('panel:collapse'),
+  // Main owns the width, so the page is told when it becomes a rail rather
+  // than trying to infer it from its own size.
+  onLayout: (fn) => ipcRenderer.on('panel:layout', (_e, layout) => fn(layout)),
+  // Hand a workspace file to whatever the OS opens it with.
+  openPath: (absPath) => ipcRenderer.invoke('panel:open-path', absPath),
   popOut: () => ipcRenderer.send('panel:popout'),
 
   // Workspace file tree — proxied by main, since this page is file:// and
