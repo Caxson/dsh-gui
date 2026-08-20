@@ -33,14 +33,56 @@ window.__ModuleLoader__.load({
 			return paths.size;
 		}
 
+		// Room for the path, in monospace columns rather than characters. There
+		// is no true monospace Chinese face, so CJK renders at two columns —
+		// counting characters would let a Chinese path take twice the width it
+		// was budgeted, and the overflow gets cut by CSS from the *end*, which
+		// is the half that identifies a path.
+		const PATH_COLUMNS = 24;
+
+		/** Display columns a string occupies: 2 for wide (CJK) glyphs, 1 otherwise. */
+		function columnsOf(text) {
+			let n = 0;
+			for (const ch of text) n += isWide(ch) ? 2 : 1;
+			return n;
+		}
+
+		// The ranges that actually turn up in a path: CJK ideographs and the
+		// kana/hangul/fullwidth blocks around them. Deliberately not the whole
+		// East Asian Width table — this decides a trim length, not layout.
+		function isWide(ch) {
+			const c = ch.codePointAt(0);
+			return (
+				(c >= 0x1100 && c <= 0x115f) || // hangul jamo
+				(c >= 0x2e80 && c <= 0xa4cf) || // CJK radicals … yi
+				(c >= 0xac00 && c <= 0xd7a3) || // hangul syllables
+				(c >= 0xf900 && c <= 0xfaff) || // CJK compatibility ideographs
+				(c >= 0xfe30 && c <= 0xfe6f) || // CJK compatibility forms
+				(c >= 0xff00 && c <= 0xff60) || // fullwidth forms
+				(c >= 0xffe0 && c <= 0xffe6) ||
+				(c >= 0x20000 && c <= 0x3fffd) // CJK extensions B+
+			);
+		}
+
 		function shortenPath(path, home) {
 			if (typeof path !== "string") return "";
 			const short = home && path.startsWith(home) ? "~" + path.slice(home.length) : path;
+			if (columnsOf(short) <= PATH_COLUMNS) return short;
 			// Keep the tail: the end of a path identifies it, the start repeats.
-			// The cap has to do the trimming, not CSS — `text-overflow` cuts the
-			// end, which is the half worth keeping. CSS ellipsis stays only as a
-			// backstop for a narrow window.
-			return short.length > 24 ? "…" + short.slice(-23) : short;
+			// The trim has to happen here, not in CSS — `text-overflow` cuts the
+			// end. CSS ellipsis stays only as a backstop for a narrow window.
+			// Walk backwards by code point, so a surrogate pair is never split
+			// into two halves that render as replacement characters.
+			const chars = [...short];
+			let used = 1; // the leading ellipsis
+			let i = chars.length;
+			while (i > 0) {
+				const w = isWide(chars[i - 1]) ? 2 : 1;
+				if (used + w > PATH_COLUMNS) break;
+				used += w;
+				i -= 1;
+			}
+			return "…" + chars.slice(i).join("");
 		}
 
 		/**
@@ -300,6 +342,9 @@ window.__ModuleLoader__.load({
 		exports.ShellStatus = ShellStatus;
 		exports.ShellAppearance = ShellAppearance;
 		exports.countChangedFiles = countChangedFiles;
+		exports.shortenPath = shortenPath;
+		exports.columnsOf = columnsOf;
+		exports.PATH_COLUMNS = PATH_COLUMNS;
 		return module.exports;
 	},
 });

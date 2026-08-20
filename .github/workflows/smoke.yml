@@ -45,6 +45,14 @@ jobs:
         # must not be able to close a CSS rule and open its own.
         run: npm run verify:themes
 
+      - name: Verify sidebar status logic
+        # The path trim has to fit a fixed strip and trim from the front. Its
+        # budget is in monospace columns, not characters: Chinese has no true
+        # monospace face and takes two columns, so a character budget let a
+        # Chinese path overflow to twice the strip — where CSS then cut the
+        # tail, which is the half that identifies a path.
+        run: npm run verify:shell
+
       - name: Run end-to-end smoke
         # The runner isolates the app's user data and DSH home itself, seeds a
         # workspace + session so the workspace-derived panes have something to
